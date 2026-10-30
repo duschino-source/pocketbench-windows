@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+release/
+.local/
+.env*
+!.env.example
+coverage/
+*.log
+*.tsbuildinfo

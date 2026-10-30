@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "pocketbench": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Meta Muse Spark (metered)",
+      "options": {
+        "baseURL": "http://127.0.0.1:43187/v1",
+        "apiKey": "{file:.local/gateway-token}"
+      },
+      "models": {
+        "muse-spark-1.3": {
+          "name": "Muse Spark 1.3 Standard",
+          "limit": {
+            "context": 131072,
+            "output": 16384
+          }
+        }
+      }
+    }
+  },
+  "model": "pocketbench/muse-spark-1.3"
+}
