@@ -11,6 +11,7 @@ const hash=(file:string)=>createHash('sha256').update(readFileSync(file)).digest
 const json=(value:unknown):JsonValue=>JSON.parse(JSON.stringify(value)) as JsonValue
 const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms))
 const result=(name:string,passed:boolean,before?:string,after?:string)=>({name,passed,...(before!==undefined?{before}:{}),...(after!==undefined?{after}:{})})
+const localPath=(value:string|undefined):value is string=>Boolean(value && !/^(?:\\\\|\/\/|[A-Za-z]+:\/\/)/.test(value) && !value.includes('\0'))
 function plainParams(params:Record<string,JsonValue>,allowed:string[]):void {if(Object.keys(params).some(key=>!allowed.includes(key)))throw new Error('Unsupported application repair parameter.')}
 function safeFile(file:string,root:string,lab:LabGuard):string {const confined=lab.confine(file,root,'Application data');lab.assertNotLink(confined,'Application data');return confined}
 export function readIni(text:string):Record<string,Record<string,string>> {
@@ -27,7 +28,7 @@ export class AppRepairs {
     if(!isDeepFamily(app.family))return {caches:[]}
     const family=app.family;const caches:{path:string;root:string}[]=[]
     let profile:string|undefined,vault:string|undefined
-    const addCache=(root:string,name:string)=>{const path=join(root,name);if(existsSync(path)){safeFile(path,root,this.lab);if(lstatSync(path).isDirectory())caches.push({path,root})}}
+    const addCache=(root:string,name:string)=>{if(!localPath(root))return;const path=safeFile(join(root,name),root,this.lab);if(existsSync(path) && lstatSync(path).isDirectory())caches.push({path,root})}
     if(this.lab.labMode) {
       const root=join(this.lab.assertLab('Application lab'),'apps',family)
       if(existsSync(root)) {
@@ -37,9 +38,9 @@ export class AppRepairs {
       }
       return {profile,vault,caches}
     }
-    const roaming=process.env.APPDATA,local=process.env.LOCALAPPDATA
+    const roaming=localPath(process.env.APPDATA)?process.env.APPDATA:undefined,local=localPath(process.env.LOCALAPPDATA)?process.env.LOCALAPPDATA:undefined
     if(family==='firefox' && roaming) {
-      const root=join(roaming,'Mozilla','Firefox'),ini=join(root,'profiles.ini')
+      const root=join(roaming,'Mozilla','Firefox'),ini=safeFile(join(root,'profiles.ini'),root,this.lab)
       if(existsSync(ini)) {
         safeFile(ini,root,this.lab);const sections=readIni(readFileSync(ini,'utf8'));const defaults:string[]=[]
         for(const [name,entry] of Object.entries(sections)) {
@@ -57,16 +58,16 @@ export class AppRepairs {
       }
     }
     if(family==='steam') {
-      if(app.installLocation && existsSync(app.installLocation))for(const name of ['appcache','config/htmlcache','steamapps/shadercache'])addCache(app.installLocation,name)
+      if(localPath(app.installLocation))for(const name of ['appcache','config/htmlcache','steamapps/shadercache'])addCache(app.installLocation,name)
       if(local)addCache(join(local,'Steam'),'htmlcache')
     }
     if(family==='obsidian' && roaming) {
       const root=join(roaming,'obsidian');for(const name of ['Cache','Code Cache','GPUCache'])addCache(root,name)
-      const registry=join(root,'obsidian.json')
+      const registry=safeFile(join(root,'obsidian.json'),root,this.lab)
       if(existsSync(registry)) {
         safeFile(registry,root,this.lab)
         try {
-          const registryData=JSON.parse(readFileSync(registry,'utf8'));const entries=Object.values(registryData.vaults||{}) as {path?:string;open?:boolean}[]
+          const registryData=JSON.parse(readFileSync(registry,'utf8'));const entries=(Object.values(registryData.vaults||{}) as {path?:string;open?:boolean}[]).filter(entry=>localPath(entry.path)).filter(entry=>{safeFile(entry.path!,entry.path!,this.lab);return true})
           const open=entries.filter(entry=>entry.open && entry.path && existsSync(join(entry.path,'.obsidian','appearance.json')))
           const candidates=open.length?open:entries.filter(entry=>entry.path && existsSync(join(entry.path,'.obsidian','appearance.json')))
           if(candidates.length===1){vault=candidates[0].path;safeFile(join(vault!,'.obsidian','appearance.json'),vault!,this.lab)}
@@ -74,7 +75,7 @@ export class AppRepairs {
       }
     }
     let exe:string|undefined
-    for(const candidate of [app.executable,app.installLocation?join(app.installLocation,RESTART_EXECUTABLES[family]):undefined])if(candidate && existsSync(candidate) && basename(candidate).toLowerCase()===RESTART_EXECUTABLES[family] && lstatSync(candidate).isFile()){safeFile(candidate,dirname(candidate),this.lab);exe=candidate;break}
+    for(const candidate of [app.executable,localPath(app.installLocation)?join(app.installLocation,RESTART_EXECUTABLES[family]):undefined])if(localPath(candidate) && basename(candidate).toLowerCase()===RESTART_EXECUTABLES[family]){safeFile(candidate,dirname(candidate),this.lab);if(existsSync(candidate) && lstatSync(candidate).isFile()){exe=candidate;break}}
     return {profile,vault,caches,exe}
   }
   capabilities(app:AppTarget):OperationId[] {
@@ -143,6 +144,11 @@ export class AppRepairs {
     const child=spawn(exe,[],{shell:false,detached:true,stdio:'ignore'});child.on('error',()=>{});child.unref()
   }
   private execution(step:RepairStep,start:string,success:boolean,output:string,backupId?:string,data:Record<string,JsonValue>={}):StepExecution{return {step,startedAt:start,finishedAt:new Date().toISOString(),success,output,backupId,data}}
+  private async runningCheck(exe:string) {
+    let found=0
+    for(let i=0;i<5 && !found;i++){await wait(300);found=(await userOperation<{found:number}>('checkProcess',{ExpectedExe:exe})).found}
+    return result('App is running again',found>0)
+  }
   async execute(step:RepairStep):Promise<StepExecution> {
     const start=new Date().toISOString();let backupId:string|undefined
     try {
@@ -205,17 +211,20 @@ export class AppRepairs {
       }
       if(step.operation==='app.restart') {
         if(this.lab.labMode)return {passed:true,summary:'Isolated restart workflow verified; no host process was launched.',checks:[result('Lab mode preserved host processes',true)]}
-        let found=0;for(let i=0;i<5 && !found;i++){await wait(300);found=(await userOperation<{found:number}>('checkProcess',{ExpectedExe:String(execution.data.exe)})).found}
-        return {passed:found>0,summary:found?'The exact app executable is running again.':'App relaunch could not be verified.',checks:[result('App is running',found>0)]}
+        const check=await this.runningCheck(String(execution.data.exe))
+        return {passed:check.passed,summary:check.passed?'The exact app executable is running again.':'App relaunch could not be verified.',checks:[check]}
       }
+      const relaunchChecks=!this.lab.labMode && execution.data.relaunchExpected?[await this.runningCheck(String(execution.data.exe))]:[]
       if(step.operation==='app.patchConfig') {
         const file=safeFile(String(execution.data.file),String(execution.data.root),this.lab)
         const actual=app.family==='firefox'?this.readPref(file,'network.proxy.type'):JSON.parse(readFileSync(file,'utf8')).cssTheme
-        const passed=actual===execution.data.value
-        return {passed,summary:passed?'The saved setting reads back with the requested value.':'The app setting does not match the repair.',checks:[result('Setting verified',passed,undefined,String(actual))]}
+        const checks=[result('Setting verified',actual===execution.data.value,undefined,String(actual)),...relaunchChecks]
+        const passed=checks.every(check=>check.passed)
+        return {passed,summary:passed?'The saved setting and any required relaunch were independently verified.':'The saved setting or app relaunch could not be verified.',checks}
       }
       const records=execution.data.records as unknown as {source:string;root:string;destination:string}[]
-      const checks=records.map(record=>{safeFile(record.destination,this.lab.quarantineDir(),this.lab);return result('Cache moved to quarantine: '+basename(record.source),!existsSync(record.source) && existsSync(record.destination))})
+      const checks=records.map(record=>{safeFile(record.destination,this.lab.quarantineDir(),this.lab);safeFile(record.source,record.root,this.lab);const moved=existsSync(record.destination) && (!existsSync(record.source) || lstatSync(record.source).ino!==lstatSync(record.destination).ino);return result('Original cache moved to quarantine: '+basename(record.source),moved)})
+      checks.push(...relaunchChecks)
       return {passed:checks.length>0 && checks.every(check=>check.passed),summary:'Cache locations and quarantine contents were independently checked.',checks}
     }catch(error){return {passed:false,summary:(error as Error).message,checks:[]}}
   }

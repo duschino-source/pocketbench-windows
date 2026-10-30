@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { AppTarget, RepairStep } from '../src/shared/contracts'
 import { LabGuard } from '../src/main/windows/lab'
 import { AppRepairs } from '../src/main/windows/apps'
+import { setProcessRunner, resetProcessRunner } from '../src/main/windows/native'
 
 function makeLab() {
   const labRoot = LabGuard.tempLab('pb-apps-')
@@ -55,7 +56,7 @@ function repairsFor(lab: LabGuard, apps: AppTarget[]) {
 let dirs: string[] = []
 function track(dir: string) { dirs.push(dir); return dir }
 beforeEach(() => { dirs = [] })
-afterEach(() => { for (const d of dirs) { try { rmSync(d, { recursive: true, force: true }) } catch {} } })
+afterEach(() => { resetProcessRunner(); for (const d of dirs) { try { rmSync(d, { recursive: true, force: true }) } catch {} } })
 
 describe('Firefox prefs repair + byte-for-byte undo', () => {
   it('repairs prefs.js and restores exact bytes on undo', async () => {
@@ -217,9 +218,23 @@ describe('cache quarantine + restore', () => {
     expect(exec.success).toBe(true)
     mkdirSync(cache, { recursive: true })
     writeFileSync(join(cache, 'fresh.tmp'), 'fresh', 'utf8')
+    expect((await repairs.verify(step,exec)).passed).toBe(true)
     const undone = await repairs.undo(exec)
     expect(undone.passed).toBe(false)
     expect(undone.summary).toMatch(/new cache/i)
+  })
+
+  it('withholds success when the setting changed but a required relaunch failed',async()=>{
+    const root=track(mkdtempSync(join(tmpdir(),'pb-relaunch-'))),file=join(root,'prefs.js')
+    writeFileSync(file,'user_pref("network.proxy.type", 0);\n')
+    const app=appFor('firefox'),lab=new LabGuard(undefined,join(root,'data'))
+    const repairs=new AppRepairs(join(root,'data'),lab,async()=>app)
+    setProcessRunner(async()=>({exitCode:0,stdout:'{"found":0,"remaining":0}',stderr:''}))
+    const step=stepFor(app,'app.patchConfig',{appId:app.id,setting:'network.proxy.type',value:0})
+    const verified=await repairs.verify(step,{step,startedAt:'',finishedAt:'',success:true,output:'',data:{file,root,value:0,relaunchExpected:true,exe:join(root,'firefox.exe')}})
+    expect(verified.passed).toBe(false)
+    expect(verified.checks.find(check=>check.name==='Setting verified')?.passed).toBe(true)
+    expect(verified.checks.find(check=>check.name==='App is running again')?.passed).toBe(false)
   })
 })
 

@@ -122,9 +122,9 @@ function Get-ExactPathProcesses([string]$fullPath) {
       try {
         $acct = New-Object System.Security.Principal.NTAccount($owner.Domain, $owner.User)
         $ownerSid = ($acct.Translate([System.Security.Principal.SecurityIdentifier])).Value
-      } catch { throw 'Unable to verify process ownership; excluding process.' }
+      } catch { throw 'Unable to verify process ownership; repair paused.' }
       if ($ownerSid -ne $sid) { continue }
-    } catch { continue }
+    } catch { throw 'Unable to verify process ownership; repair paused.' }
     $found += $p
   }
   return $found

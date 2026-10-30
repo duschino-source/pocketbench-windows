@@ -111,12 +111,14 @@ export class LabGuard {
     if (lower.startsWith('\\\\') || lower.startsWith('//')) {
       throw new Error(`${what}: network paths are not supported.`)
     }
+    const ancestors: string[] = []
     for (let ancestor = resolve(root);;) {
-      this.assertNotLink(ancestor, what)
+      ancestors.push(ancestor)
       const parent = dirname(ancestor)
       if (parent === ancestor) break
       ancestor = parent
     }
+    for (const ancestor of ancestors.reverse()) this.assertNotLink(ancestor, what)
     const realRoot = existsSync(root) ? realpathSync(root) : resolve(root)
     const absolute = resolve(realRoot, normalized)
     const withSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep

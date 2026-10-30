@@ -185,4 +185,15 @@ describe('windows native worker (no host mutations)', () => {
     expect(text).not.toMatch(/if\s*\(\$ownerSid\s*-and/)
     expect(text).toMatch(/Unable to verify process ownership/)
   })
+
+  it.skipIf(process.platform !== 'win32')('refuses an uncertain matching process instead of reporting it closed', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const sourcePath=join(process.cwd(),'resources','windows','user.ps1').replaceAll("'","''")
+    const exe=join(process.env.SystemDrive || 'C:', 'PocketBenchTest', 'firefox.exe').replaceAll("'","''")
+    const script=`function Get-Process { [CmdletBinding()] param() [pscustomobject]@{Path='${exe}';Id=987654} }; function Get-CimInstance { [CmdletBinding()] param($ClassName,$Filter) throw 'Fixture ownership query unavailable' }; $source=[IO.File]::ReadAllText('${sourcePath}'); try { & ([scriptblock]::Create($source)) -Operation checkProcess -ExpectedExe '${exe}'; exit 0 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 13 }`
+    let observed:any
+    try {execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,stdio:'pipe',timeout:30000})}catch(error){observed=error}
+    expect(observed?.status).toBe(13)
+    expect(String(observed?.stderr)).toContain('Unable to verify process ownership')
+  })
 })

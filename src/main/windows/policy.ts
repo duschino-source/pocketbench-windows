@@ -144,7 +144,7 @@ export const OPERATION_META: Record<OperationId, OperationMeta> = {
     requiresAdmin: false,
     reversible: true,
     impact: 'Moves only allow-listed cache directories to a PocketBench quarantine folder. Profiles, history, cookies, logins, saves, and documents are never matched.',
-    verification: 'Cache paths are absent from the app tree and present under quarantine.',
+    verification: 'Original cache directories are present under quarantine. Any recreated cache is a distinct directory. Required app relaunch is independently checked.',
     description: 'Quarantine application cache directories (restorable).',
     constraints: 'Final segment must be an allow-listed cache name inside explicit per-app roots. Symlinks, junctions, and executables are refused. Params: {"appId":"<discovered app id>"}.',
   },

@@ -1,0 +1,47 @@
+[
+  {
+    "case": "windows",
+    "at": "2026-10-30T17:47:39.827Z",
+    "mode": "isolated filesystem Windows state",
+    "verified": true,
+    "restored": true,
+    "realBrowserConnected": false,
+    "sources": [
+      {
+        "url": "https://support.microsoft.com/en-gb/windows/experience/connectivity-networking/fix-wi-fi-connection-issues-in-windows",
+        "title": "Fix Wi-Fi connection issues in Windows",
+        "kind": "official"
+      },
+      {
+        "url": "https://learn.microsoft.com/en-us/answers/questions/5572510/how-to-fix-proxy-setting-to-use-chrome-website-pro",
+        "title": "how to fix proxy setting to use chrome website properly - Microsoft Q&A",
+        "kind": "community"
+      }
+    ]
+  },
+  {
+    "case": "firefox",
+    "at": "2026-10-30T17:36:09.650Z",
+    "mode": "real Firefox using a disposable profile",
+    "verified": true,
+    "restored": false,
+    "realBrowserConnected": true,
+    "sources": [
+      {
+        "url": "https://support.mozilla.org/en-US/kb/server-not-found-connection-problem",
+        "title": "Server Not Found - Troubleshoot connection problems",
+        "kind": "official"
+      },
+      {
+        "url": "https://support.mozilla.org/en-US/kb/firefox-cant-load-websites-other-browsers-can",
+        "title": "Firefox can't load websites but other browsers can",
+        "kind": "official"
+      },
+      {
+        "url": "https://support.mozilla.org/en-US/kb/websites-dont-load-troubleshoot-and-fix-errors",
+        "title": "Websites don't load - troubleshoot and fix error messages | Firefox Help",
+        "kind": "official"
+      }
+    ]
+  }
+]

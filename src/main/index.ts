@@ -13,7 +13,8 @@ app.setName('PocketBench')
 let window:BrowserWindow | null=null
 let model:MeteredModel
 const dataArgument=process.argv.find(arg=>arg.startsWith('--data-dir='))
-if (dataArgument) { const path=dataArgument.slice('--data-dir='.length);mkdirSync(path,{recursive:true});app.setPath('userData',path) }
+const userDataDirectory=dataArgument?dataArgument.slice('--data-dir='.length):join(app.getPath('appData'),'PocketBenchDesktop')
+mkdirSync(userDataDirectory,{recursive:true});app.setPath('userData',userDataDirectory)
 if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance',()=>{if (window) {if(window.isMinimized())window.restore();window.focus()}})
 

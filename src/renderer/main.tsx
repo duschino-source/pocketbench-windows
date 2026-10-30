@@ -11,7 +11,7 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <React.StrictMode>
-    <FluentProvider theme={webDarkTheme} className="pb-provider">
+    <FluentProvider theme={{...webDarkTheme,fontFamilyBase:'"Segoe UI Variable", "Segoe UI", sans-serif',fontSizeBase300:'16px',lineHeightBase300:'24px'}} className="pb-provider">
       <App />
     </FluentProvider>
   </React.StrictMode>,

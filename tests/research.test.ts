@@ -67,6 +67,14 @@ describe('research call sequencing and citations', () => {
     expect(s.seen[0].prompt).toMatch(/pages never load/)
   })
 
+  it('keeps the initial Windows search specific to a manual proxy failure', async () => {
+    const s=stub([{text:'R',citations:[{url:OFFICIAL,title:'MS'}]},{text:draftJson},{text:reviewJson(OFFICIAL)}])
+    await investigate({symptom:'The manual proxy points at a closed port'},snapshot(),caps,s.model,()=>{})
+    const query=s.seen[0].prompt.split('Begin with this focused official-documentation search')[1].split('\n')[0]
+    expect(query).toContain('manual proxy turn off')
+    expect(query).not.toContain('service startup')
+  })
+
   it('throws an actionable error when the search call fails, without masquerading', async () => {
     const model: ModelClient = { call: vi.fn(async (prompt: string, options?: { search?: boolean }) => { if (options?.search) throw new Error('search offline'); return { text: draftJson, citations: [], raw: {} } }) }
     await expect(investigate({ symptom: 'DNS fails' }, snapshot(), caps, model, () => {})).rejects.toThrow(/Internet research failed/)
@@ -234,12 +242,14 @@ describe('token budgets and capability prompts', () => {
     { operation: 'app.quarantineCache', description: 'Quarantine cache (Example Browser)', targetId: 'app-1', constraints: 'Allow-listed names only' },
     { operation: 'windows.flushDns', description: 'Flush DNS cache', targetId: 'windows', constraints: 'Safe' },
   ]
-  it('requests 4096 draft and 6144 review tokens (search stays 4000)', async () => {
+  it('bounds stage tokens and constrains draft and review output with schemas', async () => {
     const s = stub([{ text: 'R', citations: [{ url: OFFICIAL, title: 'MS' }] }, { text: draftJson }, { text: reviewJson(OFFICIAL) }])
     await investigate({ symptom: 'DNS fails', appId: 'app-1' }, snapshot(), appCaps, s.model, () => {})
     expect((s.seen[0].options as { maxTokens?: number }).maxTokens).toBe(4000)
     expect((s.seen[1].options as { maxTokens?: number }).maxTokens).toBe(4096)
-    expect((s.seen[2].options as { maxTokens?: number }).maxTokens).toBe(6144)
+    expect((s.seen[2].options as { maxTokens?: number }).maxTokens).toBe(8192)
+    expect((s.seen[1].options as { schema?: unknown }).schema).toBeDefined()
+    expect((s.seen[2].options as { schema?: unknown }).schema).toBeDefined()
   })
 
   it('lists selected-app capabilities first with exact param schemas', async () => {

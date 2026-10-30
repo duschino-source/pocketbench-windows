@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:native": "vitest run tests/windows-native.test.ts",
     "gateway": "node tools/budget-gateway.mjs",
-    "dist": "npm run typecheck && npm run build && electron-builder --win nsis portable",
+    "dist": "npm run typecheck && npm run build && electron-builder --win nsis portable --publish never",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

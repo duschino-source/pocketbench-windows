@@ -45,7 +45,7 @@ export function createGateway({key, token, ledger, upstream = 'https://api.meta.
     let reservation
     try {
       let raw = ''; for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 524288) throw new Error('Request exceeds 512 KiB limit') }
-      const body = JSON.parse(raw)
+      const body = JSON.parse(raw.split(key).join('[REDACTED]'))
       if (body.model !== 'muse-spark-1.3') throw new Error('Only Muse Spark 1.3 Standard is enabled')
       const searches = (body.tools || []).filter(t => t.type === 'web_search' || t.type === 'web_search_preview').length
       if (searches && !allowSearch) throw new Error('Web research must use the application research client with separate search reservations')
