@@ -24,7 +24,7 @@ function statusColor(
 
 export function ActivityView(props: ViewProps): React.ReactElement {
   const { state, busy, selectedPlanId } = props;
-  const history = state.history.slice().reverse();
+  const history = state.history;
   const selectedPlan = findPlan(state, selectedPlanId);
 
   return (
@@ -126,7 +126,6 @@ export function ActivityView(props: ViewProps): React.ReactElement {
             <ul className="pb-list">
               {state.plans
                 .slice()
-                .reverse()
                 .map((plan) => (
                   <li key={plan.id} className="pb-row">
                     <div className="pb-row-main">

@@ -60,6 +60,5 @@ export function findPlan(state: AppState, id: string | null): RepairPlan | undef
 
 /** Latest run recorded for a plan, if any. */
 export function latestRunForPlan(state: AppState, planId: string): RepairRun | undefined {
-  const matches = state.history.filter((run) => run.planId === planId);
-  return matches.length > 0 ? matches[matches.length - 1] : undefined;
+  return state.history.find((run) => run.planId === planId);
 }

@@ -50,8 +50,8 @@ describe('renderer formatting helpers', () => {
         },
       ],
       history: [
-        { id: 'r1', planId: 'p1', title: 't', createdAt: '', status: 'fixed', executions: [], verification: [], canUndo: false },
         { id: 'r2', planId: 'p1', title: 't', createdAt: '', status: 'pending-verification', executions: [], verification: [], canUndo: false },
+        { id: 'r1', planId: 'p1', title: 't', createdAt: '', status: 'fixed', executions: [], verification: [], canUndo: false },
       ],
     } as unknown as AppState;
     expect(findPlan(state, 'p1')?.id).toBe('p1');

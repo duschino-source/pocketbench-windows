@@ -12,13 +12,11 @@ import {
   AppsRegular,
   ArrowClockwiseRegular,
   BeakerRegular,
-  CheckmarkCircleRegular,
   DesktopPulseRegular,
   DismissRegular,
   ErrorCircleRegular,
   HistoryRegular,
   HomeRegular,
-  SearchRegular,
   SettingsRegular,
   ShieldCheckmarkRegular,
 } from '@fluentui/react-icons';
@@ -277,18 +275,18 @@ export default function App(): React.ReactElement {
           </div>
           <div className="pb-brand-text">
             <div className="pb-brand-name">PocketBench</div>
-            <div className="pb-brand-sub">Windows &amp; app repair</div>
+            <div className="pb-brand-sub">Repair desktop</div>
           </div>
         </div>
 
-        <div className="pb-nav-label">Navigate</div>
+        <div className="pb-nav-label">Workspace</div>
         <div className="pb-nav">
           {NAV.map((item) => (
             <Button
               key={item.key}
               aria-label={item.label}
-              className="pb-nav-button"
-              appearance={nav === item.key ? 'secondary' : 'subtle'}
+              className={'pb-nav-button' + (item.key === 'settings' ? ' pb-nav-settings' : '')}
+              appearance="subtle"
               icon={item.icon}
               aria-current={nav === item.key ? 'page' : undefined}
               onClick={() => navigate(item.key)}
@@ -299,21 +297,14 @@ export default function App(): React.ReactElement {
         </div>
 
         <div className="pb-sidebar-foot">
-          <div>Model: Standard</div>
-          <div>{snapshot ? `Scanned ${formatDateTime(snapshot.scannedAt)}` : 'Not scanned yet'}</div>
+          <ShieldCheckmarkRegular />
+          <div><strong>Changes you control</strong><span>Review before applying</span></div>
         </div>
       </nav>
 
       <div className="pb-main">
         <header className="pb-header">
-          <div>
-            <h1 className="pb-header-title">{titleFor(nav)}</h1>
-            <p className="pb-header-sub">
-              {snapshot
-                ? `${snapshot.machine.os} · ${snapshot.diagnostics.length} diagnostics · ${snapshot.apps.length} apps`
-                : 'Find and fix Windows and app problems.'}
-            </p>
-          </div>
+          <div className="pb-breadcrumb"><DesktopPulseRegular /><span>This PC</span><span className="pb-breadcrumb-divider">/</span><span>{titleFor(nav)}</span></div>
           <div className="pb-header-spacer" />
           <div className="pb-header-meta">
             {snapshot?.labMode && (
@@ -321,15 +312,7 @@ export default function App(): React.ReactElement {
                 Lab mode
               </Badge>
             )}
-            {state && state.settings.hasApiKey ? (
-              <Badge appearance="tint" color="success" icon={<CheckmarkCircleRegular />}>
-                Key saved
-              </Badge>
-            ) : (
-              <Badge appearance="tint" color="subtle">
-                No key
-              </Badge>
-            )}
+            <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state?.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state?.settings.hasApiKey ? 'Meta connected' : 'Connect Meta'}</Button>
             {active && (
               <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
                 <Spinner size="extra-tiny" aria-label="Working" />
@@ -338,14 +321,13 @@ export default function App(): React.ReactElement {
             )}
             <Button
               appearance="primary"
-              size="small"
-              icon={<SearchRegular />}
+              icon={<ArrowClockwiseRegular />}
               disabled={!state || scanning}
               onClick={() => {
                 void handleScan();
               }}
             >
-              {scanning ? 'Scanning…' : 'Scan'}
+              {scanning ? 'Scanning…' : 'Scan PC'}
             </Button>
           </div>
         </header>
@@ -392,13 +374,8 @@ export default function App(): React.ReactElement {
             )}
 
             {notice && (
-              <MessageBar intent="success">
-                <MessageBarBody>
-                  <MessageBarTitle>
-                    <CheckmarkCircleRegular /> Done.{' '}
-                  </MessageBarTitle>
-                  {notice}
-                </MessageBarBody>
+              <div className="pb-notice" role="status">
+                <span>{notice}</span>
                 <Button
                   appearance="transparent"
                   size="small"
@@ -406,7 +383,7 @@ export default function App(): React.ReactElement {
                   aria-label="Dismiss notice"
                   onClick={() => setNotice(null)}
                 />
-              </MessageBar>
+              </div>
             )}
 
             {progress && (
@@ -420,15 +397,9 @@ export default function App(): React.ReactElement {
               </div>
             )}
 
-            {state && !state.snapshot && !loadError && nav !== 'settings' && (
-              <MessageBar intent="info">
-                <MessageBarBody>
-                  <MessageBarTitle>Ready when you are. </MessageBarTitle>
-                  Scan your PC to begin. Add your Meta API key in Settings to research fixes.
-                </MessageBarBody>
-              </MessageBar>
-            )}
           </div>
+
+          <div className="pb-page-intro"><div><h1>{titleFor(nav)}</h1><p>{{overview:'Investigate a problem. Apply a reviewed fix.',windows:'Diagnostics and repairs for your operating system.',apps:'Find an app. Describe the problem. Review the repair.',activity:'Every change, its result, and the way back.',settings:'Model connection, usage, and local preferences.'}[nav]}</p></div><span className="pb-page-context">{nav === 'apps' && snapshot ? `${snapshot.apps.length} installed` : nav === 'overview' ? 'Windows + applications' : ''}</span></div>
 
           {!state ? (
             <section className="pb-section" aria-label="Loading">
@@ -447,13 +418,8 @@ export default function App(): React.ReactElement {
             viewProps && (
               <React.Fragment>
                 {selectedPlanId && nav !== 'settings' && (
-                  <div className="pb-banners">
-                    <MessageBar intent="info">
-                      <MessageBarBody>
-                        <MessageBarTitle>Reviewing a saved plan. </MessageBarTitle>
-                        The selected plan stays visible while you switch between Overview, Windows, Apps, and
-                        Activity views.
-                      </MessageBarBody>
+                  <div className="pb-selected-plan">
+                      <span>Repair plan open below</span>
                       <Button
                         appearance="transparent"
                         size="small"
@@ -461,16 +427,17 @@ export default function App(): React.ReactElement {
                         aria-label="Close selected plan"
                         onClick={() => setSelectedPlanId(null)}
                       />
-                    </MessageBar>
                   </div>
                 )}
-                {nav === 'overview' && <OverviewView {...viewProps} />}
-                {nav === 'windows' && <WindowsView {...viewProps} />}
-                {nav === 'apps' && <AppsView {...viewProps} />}
-                {nav === 'activity' && <ActivityView {...viewProps} />}
-                {nav === 'settings' && <SettingsView {...viewProps} />}
+                <div className="pb-page-view" key={nav}>
+                  {nav === 'overview' && <OverviewView {...viewProps} />}
+                  {nav === 'windows' && <WindowsView {...viewProps} />}
+                  {nav === 'apps' && <AppsView {...viewProps} />}
+                  {nav === 'activity' && <ActivityView {...viewProps} />}
+                  {nav === 'settings' && <SettingsView {...viewProps} />}
+                </div>
                 <p className="pb-footer-note">
-                  Every repair records what changed and checks the result. Undo is available for supported changes.
+                  <ShieldCheckmarkRegular /> Changes are recorded. Results are verified. Supported changes can be undone.
                 </p>
               </React.Fragment>
             )

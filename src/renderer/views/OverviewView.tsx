@@ -1,262 +1,65 @@
 import * as React from 'react';
-import { Badge, Button, Textarea } from '@fluentui/react-components';
-import { SearchRegular, WrenchRegular } from '@fluentui/react-icons';
-import type { DiagnosticEvidence } from '../../shared/contracts';
+import { Badge, Button, ProgressBar } from '@fluentui/react-components';
+import { ArrowRightRegular, CheckmarkCircleRegular, DesktopRegular, HistoryRegular, SearchRegular, WarningRegular } from '@fluentui/react-icons';
 import type { ViewProps } from '../types';
-
-function severityColor(severity: DiagnosticEvidence['severity']): 'informative' | 'warning' | 'severe' {
-  switch (severity) {
-    case 'critical':
-      return 'severe';
-    case 'warning':
-      return 'warning';
-    case 'info':
-      return 'informative';
-  }
-}
+import { formatBytes, formatDateTime, formatUptime, runStatusLabel } from '../format';
+import { SymptomForm } from '../components/SymptomForm';
+import { PlanDetail } from '../components/PlanDetail';
+import { findPlan, latestRunForPlan } from '../types';
 
 export function OverviewView(props: ViewProps): React.ReactElement {
   const { state, busy } = props;
   const snapshot = state.snapshot;
   const diagnostics = snapshot?.diagnostics ?? [];
-  const critical = diagnostics.filter((item) => item.severity === 'critical');
-  const warnings = diagnostics.filter((item) => item.severity === 'warning');
-  const prioritized = [...critical, ...warnings].slice(0, 5);
-  const recentPlans = state.plans.slice(0, 4);
+  const issues = diagnostics.filter(item => item.severity !== 'info');
+  const findings = issues.length ? issues : diagnostics;
+  const selectedPlan = findPlan(state, props.selectedPlanId);
+  const recent = state.history.slice(0, 3);
+  const memoryUsed = snapshot ? snapshot.machine.memoryTotal - snapshot.machine.memoryFree : 0;
+  const diskUsed = snapshot ? snapshot.metrics.diskTotal - snapshot.metrics.diskFree : 0;
 
   return (
-    <div>
-      <section className="pb-section" aria-labelledby="overview-evidence">
-        <div className="pb-section-head">
-          <h2 className="pb-section-title" id="overview-evidence">
-            System overview
-          </h2>
+    <div className="pb-overview">
+      <div className="pb-stat-strip" aria-label="Latest scan summary">
+        <div><span className="pb-stat-label">Needs attention</span><strong className={issues.length ? 'pb-severity-warning' : ''}>{snapshot ? issues.length : '—'}</strong><span>{snapshot ? 'Warning & critical findings' : 'Run your first scan'}</span></div>
+        <div><span className="pb-stat-label">Installed apps</span><strong>{snapshot ? snapshot.apps.length : '—'}</strong><span>Available to investigate</span></div>
+        <div><span className="pb-stat-label">Ready to apply</span><strong>{state.plans.filter(plan => plan.status === 'ready').length}</strong><span>Reviewed repair plans</span></div>
+        <div><span className="pb-stat-label">Verified repairs</span><strong>{state.history.filter(run => run.status === 'fixed').length}</strong><span>Independent checks passed</span></div>
+      </div>
+      <div className="pb-overview-grid">
+        <div className="pb-overview-primary">
+          <section className="pb-section pb-repair-surface" aria-label="Start a repair">
+            <div className="pb-eyebrow"><span className="pb-status-dot" /> REPAIR WORKSPACE <span className="pb-model-tag">Muse Spark</span></div>
+            <SymptomForm {...props} />
+            <div className="pb-workflow" aria-label="Repair workflow"><span><b>01</b> Investigate</span><ArrowRightRegular /><span><b>02</b> Review impact</span><ArrowRightRegular /><span><b>03</b> Apply & verify</span></div>
+          </section>
+          <section className="pb-section pb-findings" aria-labelledby="overview-issues">
+            <div className="pb-section-head"><h2 className="pb-section-title" id="overview-issues">Latest findings</h2><Button appearance="subtle" size="small" icon={<ArrowRightRegular />} iconPosition="after" onClick={() => props.onNavigate('windows')}>View all</Button></div>
+            {!snapshot ? <div className="pb-quiet-empty"><SearchRegular /><div><h3>A clear picture starts with a scan</h3><p>Check Windows, services, startup, and installed applications.</p><Button appearance="secondary" disabled={busy.scan} onClick={() => void props.onScan()}>{busy.scan ? 'Scanning…' : 'Scan this PC'}</Button></div></div>
+              : !findings.length ? <div className="pb-quiet-empty"><CheckmarkCircleRegular /><div><h3>No findings in this scan</h3><p>You can still describe a problem above.</p></div></div>
+                : <ul className="pb-list">{findings.slice(0, 3).map(item => <li className="pb-row" key={item.id}><div className={'pb-finding-icon pb-severity-' + item.severity}>{item.severity === 'info' ? <DesktopRegular /> : <WarningRegular />}</div><div className="pb-row-main"><div className="pb-row-title">{item.title}</div><div className="pb-row-sub">{item.observed}</div></div><Button appearance="subtle" size="small" disabled={busy.investigating} onClick={() => void props.onInvestigate({symptom:item.title,evidenceId:item.id})}>Investigate <ArrowRightRegular /></Button></li>)}</ul>}
+          </section>
         </div>
-        {!snapshot ? (
-          <div className="pb-empty">
-            <h3>Start with your PC</h3>
-            <p>
-              Check Windows, services, startup items, and installed apps. Investigate a problem,
-              review the repair, and apply it here.
-            </p>
-            <Button
-              appearance="primary"
-              icon={<SearchRegular />}
-              disabled={busy.scan}
-              onClick={() => {
-                void props.onScan();
-              }}
-            >
-              {busy.scan ? 'Scanning…' : 'Run scan'}
-            </Button>
-          </div>
-        ) : (
-          <div>
-            <div className="pb-grid" role="list" aria-label="Scan counts">
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Diagnostics</div>
-                <div className="pb-metric-value">{diagnostics.length}</div>
-                <div className="pb-metric-sub">
-                  {critical.length} critical · {warnings.length} warning
-                </div>
-              </div>
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Applications</div>
-                <div className="pb-metric-value">{snapshot.apps.length}</div>
-                <div className="pb-metric-sub">Installed inventory entries</div>
-              </div>
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Startup entries</div>
-                <div className="pb-metric-value">{snapshot.startup.length}</div>
-                <div className="pb-metric-sub">
-                  {snapshot.startup.filter((entry) => entry.enabled).length} enabled
-                </div>
-              </div>
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Repair plans</div>
-                <div className="pb-metric-value">{state.plans.length}</div>
-                <div className="pb-metric-sub">
-                  {state.plans.filter((plan) => plan.status === 'ready').length} ready to apply
-                </div>
-              </div>
-            </div>
-            {snapshot.labMode && (
-              <p className="pb-note" style={{ marginTop: '0.75rem' }}>
-                Isolated lab mode is on: changes are validated against a test profile, not the live host.
-              </p>
-            )}
-          </div>
-        )}
-      </section>
-
-      {snapshot && (
-        <section className="pb-section" aria-labelledby="overview-metrics">
-          <div className="pb-section-head">
-            <h2 className="pb-section-title" id="overview-metrics">
-              System metrics
-            </h2>
-          </div>
-          <dl className="pb-kv">
-            <dt>Operating system</dt>
-            <dd>{snapshot.machine.os}</dd>
-            <dt>Computer</dt>
-            <dd>{snapshot.machine.name}</dd>
-            <dt>Memory</dt>
-            <dd>
-              {(snapshot.machine.memoryFree / 1024 / 1024 / 1024).toFixed(1)} GB free of{' '}
-              {(snapshot.machine.memoryTotal / 1024 / 1024 / 1024).toFixed(1)} GB
-            </dd>
-            <dt>Disk</dt>
-            <dd>
-              {(snapshot.metrics.diskFree / 1024 / 1024 / 1024).toFixed(1)} GB free of{' '}
-              {(snapshot.metrics.diskTotal / 1024 / 1024 / 1024).toFixed(1)} GB
-            </dd>
-            <dt>CPU</dt>
-            <dd>
-              {snapshot.machine.cpuCount} cores
-              {snapshot.metrics.cpuPercent === null
-                ? ' · current load unavailable'
-                : ` · ${snapshot.metrics.cpuPercent.toFixed(0)}% load`}
-            </dd>
-            <dt>Scanned</dt>
-            <dd>{new Date(snapshot.scannedAt).toLocaleString()}</dd>
-          </dl>
-        </section>
-      )}
-
-      {snapshot && (
-        <section className="pb-section" aria-labelledby="overview-issues">
-          <div className="pb-section-head">
-            <h2 className="pb-section-title" id="overview-issues">
-              Prioritized issues
-            </h2>
-            <div className="pb-section-action">
-              <Button
-                appearance="secondary"
-                size="small"
-                onClick={() => props.onNavigate('windows')}
-              >
-                Open Windows diagnostics
-              </Button>
-            </div>
-          </div>
-          {prioritized.length === 0 ? (
-            <p className="pb-note">
-              The scan found no warning or critical diagnostics. Informational findings remain under Windows
-              diagnostics.
-            </p>
-          ) : (
-            <ul className="pb-list">
-              {prioritized.map((item) => (
-                <li key={item.id} className="pb-row">
-                  <div className="pb-row-main">
-                    <div className="pb-row-title">{item.title}</div>
-                    <div className="pb-row-sub">
-                      {item.category} · {item.observed}
-                    </div>
-                  </div>
-                  <div className="pb-row-side">
-                    <Badge appearance="tint" color={severityColor(item.severity)}>
-                      {item.severity}
-                    </Badge>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
-      {snapshot && recentPlans.length > 0 && (
-        <section className="pb-section" aria-labelledby="overview-plans">
-          <div className="pb-section-head">
-            <h2 className="pb-section-title" id="overview-plans">
-              Recent repair plans
-            </h2>
-            <div className="pb-section-action">
-              <Button appearance="secondary" size="small" onClick={() => props.onNavigate('activity')}>
-                Open activity
-              </Button>
-            </div>
-          </div>
-          <ul className="pb-list">
-            {recentPlans.map((plan) => (
-              <li key={plan.id} className="pb-row">
-                <div className="pb-row-main">
-                  <div className="pb-row-title">{plan.title}</div>
-                  <div className="pb-row-sub">
-                    {plan.target.name} · {plan.status}
-                  </div>
-                </div>
-                <div className="pb-row-side">
-                  <Button
-                    appearance="secondary"
-                    size="small"
-                    icon={<WrenchRegular />}
-                    onClick={() => {
-                      props.onSelectPlan(plan.id);
-                      props.onNavigate('windows');
-                    }}
-                  >
-                    Review
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <section className="pb-section" aria-labelledby="overview-start">
-        <div className="pb-section-head">
-          <h2 className="pb-section-title" id="overview-start">
-            Getting started
-          </h2>
-        </div>
-        <ol className="pb-detail-list">
-          <li>Run a scan to collect real evidence from this computer.</li>
-          <li>Investigate one issue from Windows diagnostics or one installed application.</li>
-          <li>Review sources, impact, and reversibility before choosing Apply fix.</li>
-          <li>Track every operation and supported undo under Activity.</li>
-        </ol>
-        {!snapshot && (
-          <QuickSymptom starting={busy.investigating} onInvestigate={props.onInvestigate} />
-        )}
-      </section>
+        <aside className="pb-overview-secondary">
+          <section className="pb-section pb-device" aria-labelledby="overview-device">
+            <div className="pb-device-icon"><DesktopRegular /></div><h2 id="overview-device">{snapshot?.machine.name || 'This PC'}</h2>
+            <p className="pb-note">{snapshot?.machine.os || 'Windows 11 · Local diagnostics'}</p>
+            <Badge appearance="tint" color={!snapshot ? 'subtle' : issues.length ? 'warning' : 'success'}>{!snapshot ? 'Not scanned' : issues.length ? issues.length + ' need attention' : 'No warnings found'}</Badge>
+            {snapshot ? <div className="pb-device-metrics">
+              <div><div className="pb-meter-label"><span>Memory</span><strong>{formatBytes(memoryUsed)} / {formatBytes(snapshot.machine.memoryTotal)}</strong></div><ProgressBar value={snapshot.machine.memoryTotal ? memoryUsed/snapshot.machine.memoryTotal : 0} aria-label="Memory used" /></div>
+              <div><div className="pb-meter-label"><span>System drive</span><strong>{formatBytes(snapshot.metrics.diskFree)} free</strong></div><ProgressBar value={snapshot.metrics.diskTotal ? diskUsed/snapshot.metrics.diskTotal : 0} aria-label="System drive used" /></div>
+              <div className="pb-device-line"><span>CPU load</span><strong>{snapshot.metrics.cpuPercent === null ? 'Unavailable' : snapshot.metrics.cpuPercent.toFixed(0) + '%'}</strong></div>
+              <div className="pb-device-line"><span>Uptime</span><strong>{formatUptime(snapshot.machine.uptime)}</strong></div>
+              <p className="pb-device-time">Last scan {formatDateTime(snapshot.scannedAt)}</p>
+            </div> : <div className="pb-device-placeholder"><p>Hardware readings appear after your first scan.</p></div>}
+          </section>
+          <section className="pb-section pb-recent" aria-labelledby="overview-activity"><div className="pb-section-head"><h2 className="pb-section-title" id="overview-activity">Recent activity</h2><Button appearance="subtle" size="small" icon={<ArrowRightRegular />} aria-label="View activity" onClick={() => props.onNavigate('activity')} /></div>
+            {!recent.length ? <div className="pb-quiet-empty pb-quiet-empty-small"><HistoryRegular /><div><h3>No repairs yet</h3><p>Your changes and verification results will appear here.</p></div></div> : <ul className="pb-list">{recent.map(run => <li key={run.id} className="pb-row"><div className="pb-row-main"><div className="pb-row-title">{run.title}</div><div className="pb-row-sub">{runStatusLabel(run.status)} · {formatDateTime(run.createdAt)}</div></div></li>)}</ul>}
+          </section>
+        </aside>
+      </div>
+      {selectedPlan && <PlanDetail plan={selectedPlan} busy={busy} latestRun={latestRunForPlan(state,selectedPlan.id)} onApply={props.onApply} onOpenExternal={props.onOpenExternal} />}
     </div>
   );
 }
 
-function QuickSymptom(props: {
-  starting: boolean;
-  onInvestigate: ViewProps['onInvestigate'];
-}): React.ReactElement {
-  const [symptom, setSymptom] = React.useState('');
-  return (
-    <form
-      className="pb-form"
-      style={{ marginTop: '0.75rem' }}
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (symptom.trim().length === 0) return;
-        void props.onInvestigate({ symptom: symptom.trim() });
-      }}
-    >
-      <label htmlFor="overview-symptom" className="pb-note">
-        Describe a problem to investigate. Research uses your Meta API key.
-      </label>
-      <Textarea
-        id="overview-symptom"
-        value={symptom}
-        onChange={(_, data) => setSymptom(data.value)}
-        placeholder="Example: Wi-Fi connects but pages do not load"
-        rows={2}
-      />
-      <div className="pb-form-row">
-        <Button type="submit" appearance="secondary" disabled={props.starting || symptom.trim().length === 0}>
-          {props.starting ? 'Researching…' : 'Research symptom'}
-        </Button>
-      </div>
-    </form>
-  );
-}
