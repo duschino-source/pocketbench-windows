@@ -26,6 +26,23 @@ jobs:
       - run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Install and launch in disposable Windows runner
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'PocketBench-installed'
+          $smokeData = Join-Path $env:RUNNER_TEMP 'PocketBench-smoke'
+          $installer = Join-Path $PWD 'release/PocketBench Setup 0.1.0.exe'
+          $installed = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw 'Installer failed.' }
+          $binary = Join-Path $installRoot 'PocketBench.exe'
+          if (-not (Test-Path -LiteralPath $binary)) { throw 'Installed executable missing.' }
+          $launched = Start-Process -FilePath $binary -ArgumentList @('--smoke', "--data-dir=$smokeData") -WindowStyle Hidden -PassThru
+          if (-not $launched.WaitForExit(180000)) { throw 'Installed app launch timed out.' }
+          $result = Get-Content -LiteralPath (Join-Path $smokeData 'smoke-result.json') -Raw | ConvertFrom-Json
+          if (-not $result.ok -or -not $result.secureRenderer -or $result.labMode) { throw 'Installed application smoke verification failed.' }
+          New-Item -ItemType Directory -Path '.local' -Force | Out-Null
+          $result | ConvertTo-Json | Set-Content -LiteralPath '.local/installed-smoke.json'
+          Write-Output "Installed app scan passed: $($result.appCount) entries; renderer sandbox verified."
       - uses: actions/upload-artifact@v4
         with:
           name: PocketBench-Windows-x64
@@ -33,3 +50,4 @@ jobs:
             release/*.exe
             release/*.blockmap
             .local/native-test-result.json
+            .local/installed-smoke.json

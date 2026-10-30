@@ -8,6 +8,7 @@ Event build: October 30, 2026. These results describe implemented checks, not un
 - Three native fault tests passed in a disposable GitHub-hosted Windows VM: a real current-user proxy was repaired and restored, W32Time was started and independently checked, and a temporary startup registry value was disabled and restored. They are guarded against execution on a developer host.
 - Live Muse Spark search, structured drafting, independent review, execution, verification, and restoration passed for an isolated Windows proxy state. This case is a filesystem lab, distinct from the real Windows proxy test above.
 - Live Muse Spark research found official Mozilla documentation, repaired real preference bytes in a disposable Firefox profile, and a real headless Firefox process reached an independent local HTTP endpoint afterward. The user's browser profile was not used.
+  [Recorded live results and citations](live-model-results.json) distinguish this browser test from the Windows filesystem lab.
 - A packaged read-only smoke scan found 260 installed entries on the development machine and verified that renderer Node access was unavailable. This count describes that machine, not a bundled demo dataset.
 - Dependency audit reported no known vulnerabilities at build time.
 
