@@ -1,0 +1,35 @@
+name: Verify and package Windows
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: node --test tools/gateway.test.mjs
+      - run: npm run check
+      - name: Native repairs in disposable Windows runner
+        run: npm run test:native
+        env:
+          POCKETBENCH_CI_FAULT_TESTS: '1'
+      - run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketBench-Windows-x64
+          path: |
+            release/*.exe
+            release/*.blockmap
+            .local/native-test-result.json

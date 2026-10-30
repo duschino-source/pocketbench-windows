@@ -12,6 +12,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:native": "vitest run tests/windows-native.test.ts",
     "gateway": "node tools/budget-gateway.mjs",
     "dist": "npm run typecheck && npm run build && electron-builder --win nsis portable",
     "check": "npm run typecheck && npm test && npm run build"
@@ -41,7 +42,7 @@
     "directories": { "output": "release" },
     "files": ["out/**/*", "resources/**/*", "package.json"],
     "asarUnpack": ["resources/**/*"],
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }] },
+    "win": { "icon": "resources/icon.ico", "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }] },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false, "createDesktopShortcut": true }
   }
 }
