@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage, session, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, safeStorage, session, shell } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
@@ -6,6 +6,8 @@ import { isIP } from 'node:net'
 import { WindowsEngine } from './windows'
 import { MeteredModel, redact } from './model'
 import { Controller } from './controller'
+import { AppIcons } from './app-icons'
+import { runScript } from './windows/native'
 import type { AppSettings, InvestigateRequest } from '../shared/contracts'
 
 const here=dirname(fileURLToPath(import.meta.url))
@@ -45,12 +47,18 @@ app.whenReady().then(async()=>{
   model=new MeteredModel(dataDir,getKey)
   const settings=():AppSettings=>({hasApiKey:existsSync(credentialFile) || Boolean(process.env.POCKETBENCH_GATEWAY),budgetLimit:90,model:'muse-spark-1.3 · Standard',labMode,dataDirectory:dataDir})
   const engine=new WindowsEngine(dataDir,labMode?{labRoot:join(dataDir,'lab')}:undefined)
+  const icons=new AppIcons(id=>engine.iconTarget(id),async(file,image)=>{
+    const icon=image?nativeImage.createFromPath(file):await app.getFileIcon(file,{size:'large'})
+    return icon.isEmpty()?null:icon.resize({width:64,height:64,quality:'best'}).toDataURL()
+  })
+  const defaultProgramIcon=runScript<{icon:string}>('stock-icon.ps1',{},15000).then(result=>/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(result.icon) && result.icon.length<200000?result.icon:null).catch(()=>null)
   const controller=new Controller(dataDir,engine,model,settings,event=>window?.webContents.send('pocketbench:progress',event))
   const handle=(channel:string,callback:(...args:any[])=>unknown)=>ipcMain.handle('pocketbench:'+channel,async(event,...args)=>{
     if (!window || event.sender!==window.webContents || event.senderFrame!==window.webContents.mainFrame) throw new Error('Untrusted application frame')
     try {return await callback(...args)} catch(error) {throw new Error(redact((error as Error).message))}
   })
   handle('state',()=>controller.state());handle('scan',()=>controller.scan())
+  handle('app-icon',async(id:unknown)=>(await icons.get(id)) || await defaultProgramIcon)
   handle('investigate',(request:InvestigateRequest)=>controller.investigate(request))
   handle('apply',(planId:unknown)=>{if(typeof planId!=='string')throw new Error('Invalid plan identifier');return controller.apply(planId)})
   handle('undo',(runId:unknown)=>{if(typeof runId!=='string')throw new Error('Invalid repair identifier');return controller.undo(runId)})
@@ -65,7 +73,7 @@ app.whenReady().then(async()=>{
   session.defaultSession.setPermissionCheckHandler(()=>false)
   const devUrl=process.env.ELECTRON_RENDERER_URL
   const startUrl=devUrl || new URL('../renderer/index.html',import.meta.url).href
-  window=new BrowserWindow({width:1340,height:880,minWidth:980,minHeight:680,title:'PocketBench',icon:join(process.env.POCKETBENCH_RESOURCES,'icon.ico'),backgroundColor:'#111418',show:true,autoHideMenuBar:true,webPreferences:{preload:join(here,'../preload/index.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,spellcheck:false}})
+  window=new BrowserWindow({width:1340,height:880,minWidth:980,minHeight:680,title:'PocketBench',icon:join(process.env.POCKETBENCH_RESOURCES,'icon.ico'),backgroundColor:'#000000',show:true,autoHideMenuBar:true,webPreferences:{preload:join(here,'../preload/index.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,spellcheck:false}})
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}))
   window.webContents.on('will-navigate',(event,url)=>{if(url!==startUrl)event.preventDefault()})
   window.webContents.on('will-attach-webview',event=>event.preventDefault())

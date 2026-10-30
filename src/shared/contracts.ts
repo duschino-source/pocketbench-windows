@@ -55,6 +55,7 @@ export interface AppState { snapshot: SystemSnapshot | null; plans: RepairPlan[]
 export interface ProgressEvent { phase: 'scan' | 'research' | 'review' | 'apply' | 'verify' | 'undo'; message: string; planId?: string }
 export interface PocketBenchAPI {
   getState(): Promise<AppState>; scan(): Promise<SystemSnapshot>
+  getAppIcon(appId: string): Promise<string | null>
   investigate(request: InvestigateRequest): Promise<RepairPlan>; apply(planId: string): Promise<RepairRun>
   undo(runId: string): Promise<RepairRun>; saveApiKey(key: string): Promise<AppSettings>
   clearApiKey(): Promise<AppSettings>; openExternal(url: string): Promise<void>

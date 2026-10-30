@@ -1,3 +1,5 @@
+<img src="resources/brand/lockup.png" alt="PocketBench — Windows and app repair" width="560" />
+
 # PocketBench
 
 A Windows desktop repair agent powered by Meta Muse Spark. Investigate Windows and app problems, research version-specific fixes, review their impact, apply supported operations, and verify what changed.
@@ -23,6 +25,8 @@ Community sources can support execution only with independent corroboration. Mis
 Requires Windows 11 x64 and Node.js 24. Run `npm ci`, then `npm run dev`. Configure your own Meta Model API key in Settings.
 
 `npm run check` runs type checking, automated tests, and the production build. `npm run dist` creates a Windows installer and portable executable.
+
+After building, run `node tools/check-ui.cjs` for isolated checks of text contrast, true-black surfaces, icon loading, reduced motion, and 100–200% renderer zoom. `node tools/generate-icons.cjs` regenerates brand exports from the SVG masters. See [brand provenance and interface rules](docs/BRAND.md).
 
 `node --test tools/gateway.test.mjs` checks metering and credential boundaries. For delegated coding, set `POCKETBENCH_KEY_FILE` to a credential file outside this repository, run `npm run gateway`, then use the checked-in OpenCode provider configuration. The loopback gateway reserves conservative request costs before Meta calls and caps the ledger at $90. It cannot govern unrelated account usage. See [architecture](docs/ARCHITECTURE.md).
 

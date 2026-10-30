@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppTarget, DiagnosticEvidence, JsonValue, OperationId, RepairCapability, RepairStep, ServiceInfo, StartupEntry, StepExecution, SystemSnapshot, VerificationResult } from '../shared/contracts'
 import { LabGuard } from './windows/lab'
+import type { IconTarget } from './app-icons'
 import { AppRepairs } from './windows/apps'
 import { runScript, userOperation, elevatedOperation } from './windows/native'
 import { OPERATION_META, SELECTED_SERVICES, isSelectedService, SECURITY_STARTUP_PATTERN, WINGET_ID_PATTERN } from './windows/policy'
@@ -49,6 +50,7 @@ export class WindowsEngine {
   private lab:LabGuard
   private apps:AppRepairs
   private latest:SystemSnapshot|null=null
+  private iconTargets=new Map<string,IconTarget>()
   readonly labMode:boolean
   constructor(private dataDirectory:string,options?:{labRoot?:string}) {
     if(!dataDirectory)throw new Error('A local data directory is required.')
@@ -62,6 +64,7 @@ export class WindowsEngine {
     const raw=await runScript<RawScan>('scan.ps1')
     const packages=await wingetInventory()
     const seen=new Set<string>();const apps:AppTarget[]=[]
+    this.iconTargets.clear()
     for(const entry of raw.apps||[]) {
       const name=String(entry.name||'').trim();if(!name)continue
       const identity=`${entry.hive||''}|${entry.id||''}|${name}`;if(seen.has(identity))continue;seen.add(identity)
@@ -69,6 +72,7 @@ export class WindowsEngine {
       const matches=packages.filter(row=>row.name.toLowerCase()===name.toLowerCase() && (!entry.version || row.version===entry.version))
       const app:AppTarget={id:'app-'+createHash('sha256').update(matches.length===1?'winget:'+matches[0].id:identity).digest('hex').slice(0,20),name,version:String(entry.version||''),publisher:String(entry.publisher||''),family:family(name),installLocation:entry.installLocation||undefined,executable:/\.exe$/i.test(icon)?icon:undefined,packageId:matches.length===1?matches[0].id:undefined,capabilities:[]}
       app.capabilities=this.apps.capabilities(app);apps.push(app)
+      this.iconTargets.set(app.id,{app,registeredIcon:entry.displayIcon,store:entry.hive==='Appx'})
     }
     apps.sort((a,b)=>a.name.localeCompare(b.name))
     let services=(raw.services||[]).map(service=>({...service,startType:service.startType||''}))
@@ -101,6 +105,7 @@ export class WindowsEngine {
     for(const entry of snapshot.startup)if(entry.id.startsWith('HKCU\\Run\\') && !SECURITY_STARTUP_PATTERN.test(entry.name+' '+entry.command))capabilities.push({operation:'windows.disableStartup',targetId:entry.id,description:'Disable startup: '+entry.name,constraints:`Params: {"entryId":${JSON.stringify(entry.id)}}. Current-user entry only; complete original value is backed up.`})
     return capabilities
   }
+  iconTarget(id:string):IconTarget|undefined {return this.iconTargets.get(id)}
   validateStep(step:RepairStep,snapshot:SystemSnapshot):RepairStep {
     if(!step || typeof step.id!=='string' || !step.id || !Object.hasOwn(OPERATION_META,step.operation) || !step.params || typeof step.params!=='object' || Array.isArray(step.params))throw new Error('Invalid repair operation.')
     if(step.operation.startsWith('app.'))return this.apps.validate(step,snapshot)

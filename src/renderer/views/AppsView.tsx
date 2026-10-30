@@ -5,6 +5,7 @@ import type { AppTarget, OperationId } from '../../shared/contracts';
 import { findPlan, latestRunForPlan, type ViewProps } from '../types';
 import { PlanDetail } from '../components/PlanDetail';
 import { SymptomForm } from '../components/SymptomForm';
+import { ProgramIcon } from '../components/ProgramIcon';
 
 const OPERATION_LABELS: Partial<Record<OperationId,string>> = {'app.updatePackage':'Package update','app.patchConfig':'Supported settings','app.quarantineCache':'Cache repair','app.restart':'App restart'};
 const isIdentifier=(name:string)=>/^[0-9a-f]{8}-[0-9a-f-]+$/i.test(name);
@@ -32,8 +33,8 @@ export function AppsView(props:ViewProps):React.ReactElement {
         <div className="pb-apps-catalog">
           <div className="pb-apps-toolbar"><SearchBox placeholder="Search applications…" aria-label="Search installed applications" value={query} onChange={(_,data)=>setQuery(data.value??'')} /><div className="pb-app-filters" role="group" aria-label="Application filters"><Button size="small" appearance="subtle" aria-pressed={!repairOnly} onClick={()=>setRepairOnly(false)}>All apps <span>{apps.length}</span></Button><Button size="small" appearance="subtle" aria-pressed={repairOnly} onClick={()=>setRepairOnly(true)}>Repair tools <span>{apps.filter(app=>app.capabilities.length>0).length}</span></Button></div></div>
           <ul className="pb-app-list" aria-label="Application inventory">
-            {filtered.map(app=><li key={app.id}><button type="button" className="pb-app-entry" aria-pressed={selectedId===app.id} onClick={()=>setSelectedId(app.id)}>
-              <span className="pb-app-avatar" aria-hidden="true">{isIdentifier(app.name)?<AppsRegular />:app.name.charAt(0).toUpperCase()}</span>
+            {filtered.map((app,index)=><li key={app.id}><button type="button" className="pb-app-entry" aria-pressed={selectedId===app.id} onClick={()=>setSelectedId(app.id)}>
+              <ProgramIcon app={app} eager={index<12} />
               <span className="pb-app-copy"><span className="pb-app-name">{app.name}</span><span className="pb-app-meta">{publisher(app)}{app.version?' · '+app.version:''}</span></span>
               {app.capabilities.length>0 && <span className="pb-capability-dot" title="Repair tools available" aria-label="Repair tools available" />}<ChevronRightRegular className="pb-app-chevron" />
             </button></li>)}
@@ -44,7 +45,7 @@ export function AppsView(props:ViewProps):React.ReactElement {
         <div className="pb-app-inspector">
           {!selectedApp?<div className="pb-inspector-empty"><div className="pb-inspector-graphic"><AppsRegular /></div><h2>Let’s look at an app</h2><p>Select an application to see available repair tools and investigate a problem.</p><span>Installed version · Supported repairs · Sources</span></div>
             :<div className="pb-inspector-content" key={selectedApp.id}>
-              <div className="pb-inspector-heading"><span className="pb-app-avatar pb-app-avatar-large">{selectedApp.name.charAt(0).toUpperCase()}</span><div><h2>{selectedApp.name}</h2><p>{publisher(selectedApp)} · {selectedApp.version || 'Version unavailable'}</p></div></div>
+              <div className="pb-inspector-heading"><ProgramIcon app={selectedApp} large /><div><h2>{selectedApp.name}</h2><p>{publisher(selectedApp)} · {selectedApp.version || 'Version unavailable'}</p></div></div>
               <div className="pb-app-tools"><span className="pb-eyebrow">AVAILABLE TOOLS</span><div>{selectedApp.capabilities.length ? selectedApp.capabilities.map(operation=><span className="pb-tool-tag" key={operation}><CheckmarkCircleRegular />{OPERATION_LABELS[operation] || operation}</span>):<span className="pb-note">Research available. No automatic repair tools detected.</span>}</div></div>
               <SymptomForm {...props} app={selectedApp} />
               <details className="pb-technical"><summary>Installation details</summary><dl className="pb-kv"><dt>Identifier</dt><dd>{selectedApp.id}</dd>{selectedApp.installLocation&&<><dt>Location</dt><dd>{selectedApp.installLocation}</dd></>}{selectedApp.executable&&<><dt>Executable</dt><dd>{selectedApp.executable}</dd></>}{selectedApp.packageId&&<><dt>Package</dt><dd>{selectedApp.packageId}</dd></>}</dl></details>

@@ -19,7 +19,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
             Model API key
           </h2>
           <div className="pb-section-action">
-            <Badge appearance="tint" color={settings.hasApiKey ? 'success' : 'subtle'}>
+            <Badge appearance="tint" color="subtle">
               {settings.hasApiKey ? 'Key saved' : 'No key saved'}
             </Badge>
           </div>
@@ -123,7 +123,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
           <dd className="pb-mono">{settings.dataDirectory}</dd>
           <dt>Lab status</dt>
           <dd>
-            <Badge appearance="tint" color={settings.labMode ? 'warning' : 'success'}>
+            <Badge appearance="tint" color="subtle">
               {settings.labMode ? 'Isolated lab mode' : 'Live mode'}
             </Badge>
           </dd>

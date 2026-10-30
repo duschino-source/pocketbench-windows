@@ -78,7 +78,7 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                     )}
                   </div>
                   <div className="pb-row-side">
-                    <Badge appearance="tint" color={statusColor(run.status)}>
+                    <Badge appearance="tint" color="subtle">
                       {runStatusLabel(run.status)}
                     </Badge>
                     {run.canUndo ? (

@@ -44,7 +44,7 @@ export function OverviewView(props: ViewProps): React.ReactElement {
           <section className="pb-section pb-device" aria-labelledby="overview-device">
             <div className="pb-device-icon"><DesktopRegular /></div><h2 id="overview-device">{snapshot?.machine.name || 'This PC'}</h2>
             <p className="pb-note">{snapshot?.machine.os || 'Windows 11 · Local diagnostics'}</p>
-            <Badge appearance="tint" color={!snapshot ? 'subtle' : issues.length ? 'warning' : 'success'}>{!snapshot ? 'Not scanned' : issues.length ? issues.length + ' need attention' : 'No warnings found'}</Badge>
+            <Badge appearance="tint" color="subtle">{!snapshot ? 'Not scanned' : issues.length ? issues.length + ' need attention' : 'No warnings found'}</Badge>
             {snapshot ? <div className="pb-device-metrics">
               <div><div className="pb-meter-label"><span>Memory</span><strong>{formatBytes(memoryUsed)} / {formatBytes(snapshot.machine.memoryTotal)}</strong></div><ProgressBar value={snapshot.machine.memoryTotal ? memoryUsed/snapshot.machine.memoryTotal : 0} aria-label="Memory used" /></div>
               <div><div className="pb-meter-label"><span>System drive</span><strong>{formatBytes(snapshot.metrics.diskFree)} free</strong></div><ProgressBar value={snapshot.metrics.diskTotal ? diskUsed/snapshot.metrics.diskTotal : 0} aria-label="System drive used" /></div>

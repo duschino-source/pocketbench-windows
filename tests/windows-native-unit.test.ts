@@ -179,6 +179,13 @@ describe('windows native worker (no host mutations)', () => {
     expect(text).toMatch(/No independent integrity check available/)
   })
 
+  it.skipIf(process.platform !== 'win32')('reads the Windows generic application icon without changing host state', async () => {
+    const result=await runScript<{icon:string}>('stock-icon.ps1')
+    expect(result.icon).toMatch(/^data:image\/png;base64,/)
+    const png=Buffer.from(result.icon.split(',')[1],'base64')
+    expect(png.subarray(0,8)).toEqual(Buffer.from([137,80,78,71,13,10,26,10]))
+  },30000)
+
   it('fails closed on process ownership check errors', async () => {
     const { readFileSync } = await import('node:fs')
     const text = readFileSync(join(process.cwd(), 'resources', 'windows', 'user.ps1'), 'utf8')

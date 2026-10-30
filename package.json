@@ -1,6 +1,6 @@
 {
   "name": "pocketbench",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Windows and application repair powered by Meta Muse Spark",
   "private": true,
   "type": "module",
@@ -25,6 +25,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -39,10 +40,39 @@
   "build": {
     "appId": "dev.pocketbench.desktop",
     "productName": "PocketBench",
-    "directories": { "output": "release" },
-    "files": ["out/**/*", "resources/**/*", "package.json"],
-    "asarUnpack": ["resources/**/*"],
-    "win": { "icon": "resources/icon.ico", "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false, "createDesktopShortcut": true }
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "resources/**/*"
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true
+    }
   }
 }

@@ -3,6 +3,7 @@ import type { PocketBenchAPI, ProgressEvent } from '../shared/contracts'
 const api: PocketBenchAPI = {
   getState: () => ipcRenderer.invoke('pocketbench:state'),
   scan: () => ipcRenderer.invoke('pocketbench:scan'),
+  getAppIcon: appId => ipcRenderer.invoke('pocketbench:app-icon',appId),
   investigate: request => ipcRenderer.invoke('pocketbench:investigate',request),
   apply: planId => ipcRenderer.invoke('pocketbench:apply',planId),
   undo: runId => ipcRenderer.invoke('pocketbench:undo',runId),

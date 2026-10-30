@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 
 export const LIMIT = 90
+export const IMAGE_COST = .01
 export function cost(input, output, searches = 0) { return input * 1.25 / 1e6 + output * 4.25 / 1e6 + searches * .0025 }
 export class BudgetLedger {
   constructor(path, limit = LIMIT) {
@@ -33,7 +34,7 @@ export class BudgetLedger {
   }
 }
 
-export function createGateway({key, token, ledger, upstream = 'https://api.meta.ai', allowSearch = false}) {
+export function createGateway({key, token, ledger, upstream = 'https://api.meta.ai', allowSearch = false, allowImages = false}) {
   return http.createServer(async (req, res) => {
     const send = (status, object) => { if (!res.headersSent) res.writeHead(status, {'Content-Type':'application/json'}); res.end(JSON.stringify(object)) }
     const supplied = Buffer.from((req.headers.authorization || '').replace(/^Bearer /, ''))
@@ -41,26 +42,33 @@ export function createGateway({key, token, ledger, upstream = 'https://api.meta.
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return send(401, {error:{message:'Gateway authentication required'}})
     if (req.url === '/budget') return send(200, ledger.snapshot())
     if (req.url === '/v1/models') return send(200, {object:'list',data:[{id:'muse-spark-1.3',object:'model',owned_by:'meta'}]})
-    if (req.method !== 'POST' || !['/v1/chat/completions','/v1/responses'].includes(req.url)) return send(404, {error:{message:'Unsupported gateway endpoint'}})
+    const imageRequest = req.url === '/v1/images/generations'
+    if (req.method !== 'POST' || !['/v1/chat/completions','/v1/responses',...(allowImages?['/v1/images/generations']:[])].includes(req.url)) return send(404, {error:{message:'Unsupported gateway endpoint'}})
     let reservation
     try {
       let raw = ''; for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 524288) throw new Error('Request exceeds 512 KiB limit') }
-      const body = JSON.parse(raw.split(key).join('[REDACTED]'))
-      if (body.model !== 'muse-spark-1.3') throw new Error('Only Muse Spark 1.3 Standard is enabled')
+      let body = JSON.parse(raw.split(key).join('[REDACTED]'))
+      if (body.model !== (imageRequest?'muse-image-1.0':'muse-spark-1.3')) throw new Error('Unsupported model for this gateway endpoint')
+      if(imageRequest) {
+        if(body.n!==1 || typeof body.prompt!=='string' || !body.prompt.trim() || body.prompt.length>12000)throw new Error('Brand generation requires one image and a bounded prompt')
+        body={model:'muse-image-1.0',prompt:body.prompt,n:1,size:'1024x1024',response_format:'b64_json',output_format:'png',reasoning_strength:'high',tool_enablement:{enable_image_search:false,enable_web_search:false,enable_shell:false}}
+      }
       const searches = (body.tools || []).filter(t => t.type === 'web_search' || t.type === 'web_search_preview').length
       if (searches && !allowSearch) throw new Error('Web research must use the application research client with separate search reservations')
       if (searches) { body.max_tool_calls = 1; body.stream = false }
       // A byte per input token is deliberately conservative. Unknown usage keeps the full reservation.
       const maxOutput = Math.min(16384, Math.max(256, Number(body.max_tokens || body.max_output_tokens || body.max_completion_tokens || 8192)))
       if (!Number.isFinite(maxOutput)) throw new Error('Invalid token budget')
-      if (req.url.endsWith('/responses')) body.max_output_tokens = maxOutput
-      else { body.max_tokens = maxOutput; delete body.max_completion_tokens }
-      body.reasoning_effort ||= req.url.endsWith('/responses') ? undefined : 'medium'
+      if (!imageRequest) {
+        if (req.url.endsWith('/responses')) body.max_output_tokens = maxOutput
+        else { body.max_tokens = maxOutput; delete body.max_completion_tokens }
+        body.reasoning_effort ||= req.url.endsWith('/responses') ? undefined : 'medium'
+      }
       const streamed = Boolean(body.stream)
       if (streamed && req.url.endsWith('/chat/completions')) body.stream_options = {...body.stream_options,include_usage:true}
-      const reserve = cost(Buffer.byteLength(JSON.stringify(body)) + 4096, maxOutput, searches ? 128 : 0)
-      reservation = ledger.reserve(reserve)
-      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 240000)
+      const reserve = imageRequest?IMAGE_COST:cost(Buffer.byteLength(JSON.stringify(body)) + 4096, maxOutput, searches ? 128 : 0)
+      reservation = ledger.reserve(reserve,imageRequest?'development-brand':'development')
+      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), imageRequest?600000:240000)
       const response = await fetch(upstream + req.url, {method:'POST', headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'}, body:JSON.stringify(body), signal:controller.signal}).finally(() => clearTimeout(timeout))
       if (!response.ok) {
         const error = (await response.text()).split(key).join('[REDACTED]')
@@ -79,6 +87,10 @@ export function createGateway({key, token, ledger, upstream = 'https://api.meta.
         }
       } else {
         const parsed = JSON.parse(result); usage = parsed.usage
+        if(imageRequest) {
+          if(!Array.isArray(parsed.data) || parsed.data.length>1 || parsed.data.some(item=>typeof item.b64_json!=='string' || !item.b64_json))throw new Error('Unexpected image response; reservation retained')
+          ledger.settle(reservation,parsed.data.length*IMAGE_COST);res.end();return
+        }
         for (const item of parsed.output || []) if (item.type === 'web_search_call' && item.action?.type === 'search') searchQueries += item.action.queries?.length || (item.action.query ? 1 : 0)
         // If provider omits search accounting, keep the conservative search reservation charged.
         if (searches && !searchQueries) searchQueries = 128

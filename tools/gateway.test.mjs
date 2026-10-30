@@ -49,3 +49,34 @@ test('gateway protects key, rejects unsafe routes, and accounts actual generated
     assert.equal(calls,1);assert.equal(ledger.snapshot().spent,cost(20,10));assert.equal(ledger.snapshot().reserved,0)
   } finally { gateway.closeAllConnections(); upstream.closeAllConnections();await Promise.all([new Promise(r=>gateway.close(r)),new Promise(r=>upstream.close(r))]);rmSync(dir,{recursive:true,force:true}) }
 })
+
+test('development image generation reserves fixed per-image cost and keeps app gateways closed',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'pocketbench-image-budget-'));let calls=0
+  const upstream=createServer(async(req,res)=>{
+    calls++;let raw='';for await(const chunk of req)raw+=chunk
+    const body=JSON.parse(raw)
+    assert.equal(body.model,'muse-image-1.0');assert.equal(body.n,1)
+    assert.equal(body.max_tokens,undefined);assert.equal(body.reasoning_effort,undefined)
+    assert.deepEqual(body.tool_enablement,{enable_image_search:false,enable_web_search:false,enable_shell:false})
+    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{b64_json:'aW1hZ2U='}],usage:{input_tokens:999999,output_tokens:999999}}))
+  })
+  const listen=server=>new Promise(resolve=>server.listen(0,'127.0.0.1',()=>resolve(server.address().port)))
+  const upstreamPort=await listen(upstream),ledger=new BudgetLedger(join(dir,'ledger.jsonl'),.015)
+  const appGateway=createGateway({key:'provider-test-key',token:'local-token',ledger,upstream:'http://127.0.0.1:'+upstreamPort})
+  const devGateway=createGateway({key:'provider-test-key',token:'local-token',ledger,upstream:'http://127.0.0.1:'+upstreamPort,allowImages:true})
+  const appPort=await listen(appGateway),devPort=await listen(devGateway)
+  const post=(port,body)=>fetch('http://127.0.0.1:'+port+'/v1/images/generations',{method:'POST',headers:{Authorization:'Bearer local-token','Content-Type':'application/json'},body:JSON.stringify(body)})
+  try {
+    const body={model:'muse-image-1.0',prompt:'An original logo',n:1}
+    assert.equal((await post(appPort,body)).status,404)
+    assert.equal((await post(devPort,{...body,n:2})).status,400)
+    assert.equal(calls,0)
+    const response=await post(devPort,body);assert.equal(response.status,200);await response.json()
+    assert.equal(ledger.snapshot().spent,.01);assert.equal(ledger.snapshot().reserved,0)
+    assert.equal((await post(devPort,body)).status,400);assert.equal(calls,1)
+  } finally {
+    for(const server of [appGateway,devGateway,upstream])server.closeAllConnections()
+    await Promise.all([appGateway,devGateway,upstream].map(server=>new Promise(resolve=>server.close(resolve))))
+    rmSync(dir,{recursive:true,force:true})
+  }
+})

@@ -5,8 +5,6 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
-  ProgressBar,
-  Spinner,
 } from '@fluentui/react-components';
 import {
   AppsRegular,
@@ -33,6 +31,8 @@ import { WindowsView } from './views/WindowsView';
 import { AppsView } from './views/AppsView';
 import { ActivityView } from './views/ActivityView';
 import { SettingsView } from './views/SettingsView';
+
+const brandMark = new URL('../../resources/brand/mark.svg', import.meta.url).href;
 
 const NAV: Array<{ key: NavKey; label: string; icon: React.ReactElement }> = [
   { key: 'overview', label: 'Overview', icon: <HomeRegular /> },
@@ -271,7 +271,7 @@ export default function App(): React.ReactElement {
       <nav className="pb-sidebar" aria-label="Primary">
         <div className="pb-brand">
           <div className="pb-brand-mark" aria-hidden="true">
-            <ShieldCheckmarkRegular />
+            <img src={brandMark} alt="" />
           </div>
           <div className="pb-brand-text">
             <div className="pb-brand-name">PocketBench</div>
@@ -308,14 +308,14 @@ export default function App(): React.ReactElement {
           <div className="pb-header-spacer" />
           <div className="pb-header-meta">
             {snapshot?.labMode && (
-              <Badge appearance="tint" color="warning" icon={<BeakerRegular />}>
+              <Badge appearance="tint" color="subtle" icon={<BeakerRegular />}>
                 Lab mode
               </Badge>
             )}
             <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state?.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state?.settings.hasApiKey ? 'Meta connected' : 'Connect Meta'}</Button>
             {active && (
-              <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
-                <Spinner size="extra-tiny" aria-label="Working" />
+              <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ArrowClockwiseRegular aria-hidden="true" />
                 Working…
               </span>
             )}
@@ -388,12 +388,12 @@ export default function App(): React.ReactElement {
 
             {progress && (
               <div className="pb-progress" role="status">
-                <Spinner size="extra-tiny" aria-label={`${progress.phase} in progress`} />
+                <ArrowClockwiseRegular aria-hidden="true" />
                 <span>
                   <strong>{progress.phase}:</strong> {progress.message}
                 </span>
                 <span style={{ flex: 1 }} />
-                <ProgressBar value={undefined} thickness="large" style={{ width: '12rem' }} aria-label={`${progress.phase} progress`} />
+                <span className="pb-phase-tag">{progress.phase === 'scan' ? 'Collecting evidence' : 'In progress'}</span>
               </div>
             )}
 
@@ -405,7 +405,7 @@ export default function App(): React.ReactElement {
             <section className="pb-section" aria-label="Loading">
               {!loadError ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <Spinner aria-label="Loading application state" />
+                  <ArrowClockwiseRegular aria-hidden="true" />
                   <span className="pb-note">Loading application state…</span>
                 </div>
               ) : (
@@ -429,7 +429,7 @@ export default function App(): React.ReactElement {
                       />
                   </div>
                 )}
-                <div className="pb-page-view" key={nav}>
+                <div className="pb-page-view">
                   {nav === 'overview' && <OverviewView {...viewProps} />}
                   {nav === 'windows' && <WindowsView {...viewProps} />}
                   {nav === 'apps' && <AppsView {...viewProps} />}
