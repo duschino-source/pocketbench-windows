@@ -10,11 +10,13 @@ Built during the Meta Global AI Developer Hackathon, beginning October 30, 2026.
 
 Download the installer or portable build from [Releases](https://github.com/duschino-source/pocketbench-windows/releases/latest). Windows 11 x64 is the supported target. This event build is unsigned.
 
-Open PocketBench, scan your PC, and describe a problem under Windows or select an installed app. Investigate uses live Meta web search, a structured repair draft, and an independent review. Review sources, affected resources, interruptions, backup coverage, and privileges, then choose **Apply fix**. Only supported local operations can execute. Windows may display UAC.
+Open PocketBench, scan your PC, and describe a problem under Windows or select an installed app. Investigate lets Muse call bounded local Windows diagnostics, then uses live Meta web search, a structured repair draft, and an independent review. Review sources, affected resources, interruptions, backup coverage, and privileges, then choose **Apply fix**. Only supported local operations can execute. Windows may display UAC.
 
 Settings accepts your Meta Model API key. Windows encrypts the stored key locally; the renderer and distributed packages never receive it. Redacted symptom, OS/app version, and selected diagnostic evidence are sent to Meta for investigation. Diagnostic records and repair backups remain local.
 
 ## Coverage
+
+[Callable diagnostic tools](docs/TOOLS.md) provide fresh network, service, and event observations before a repair is researched. They are read-only; changes require the reviewed Apply fix workflow.
 
 Windows operations cover manual user proxies, DNS cache, selected stopped services, DISM/SFC, and eligible current-user startup entries. App inventory includes registry and current-user Store apps. All inventoried apps can be investigated; executable coverage depends on current capabilities. Exact WinGet updates and deeper Firefox, Steam, and Obsidian operations are documented in [repair coverage](docs/REPAIR-COVERAGE.md).
 

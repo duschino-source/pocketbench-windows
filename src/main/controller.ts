@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { AppSettings, AppState, InvestigateRequest, ProgressEvent, RepairPlan, RepairRun, SystemSnapshot } from '../shared/contracts'
+import type { AppSettings, AppState, DiagnosticEvidence, InvestigateRequest, ProgressEvent, RepairPlan, RepairRun, SystemSnapshot } from '../shared/contracts'
 import type { WindowsEngine } from './windows'
 import type { MeteredModel } from './model'
 import { investigate } from './research'
+import { runDiagnosticAgent } from './diagnostic-agent'
+import { redact } from './model'
 
 export class Controller {
   private snapshot: SystemSnapshot | null = null
@@ -49,8 +51,22 @@ export class Controller {
   async investigate(request: InvestigateRequest): Promise<RepairPlan> {
     return this.exclusive(async()=> {
       if (!request || typeof request.symptom!=='string' || request.symptom.trim().length<3 || request.symptom.length>4000) throw new Error('Describe the problem using 3–4000 characters.')
-      const snapshot=this.snapshot || await this.engine.scan();this.snapshot=snapshot
+      let snapshot=this.snapshot || await this.engine.scan();this.snapshot=snapshot
       if (request.appId && !snapshot.apps.some(app=>app.id===request.appId)) throw new Error('This application is no longer in the inventory. Scan again.')
+      if(!snapshot.labMode && typeof this.model.diagnosticTurn==='function') {
+        const selected=snapshot.apps.find(app=>app.id===request.appId)
+        const context=JSON.stringify({os:snapshot.machine.os,target:selected?{name:selected.name,version:selected.version}:'Windows',services:snapshot.services.map(service=>({name:service.name,status:service.status,startType:service.startType}))})
+        let collected:DiagnosticEvidence[]=[]
+        try {
+          const diagnostic=await runDiagnosticAgent({symptom:request.symptom,context,appId:request.appId,transport:turn=>this.model.diagnosticTurn(turn),onProgress:this.progress})
+          collected=diagnostic.evidence
+          if(diagnostic.issues.length)collected.push({id:'diagnostic-issue-'+randomUUID(),area:'windows',category:'diagnostics',title:'Some local checks were unavailable',severity:'info',observed:'Incomplete checks do not establish a Windows fault.',details:diagnostic.issues.map(issue=>redact(issue).slice(0,300)),...(request.appId?{appId:request.appId}:{}),context:{source:'local-read-only-tool',status:'unavailable',readOnly:true}})
+        } catch(error) {
+          collected=[{id:'diagnostic-issue-'+randomUUID(),area:'windows',category:'diagnostics',title:'Local diagnostic collection was unavailable',severity:'info',observed:'No local tool outcome was assumed.',details:[redact((error as Error).message).slice(0,300)],...(request.appId?{appId:request.appId}:{}),context:{source:'local-read-only-tool',status:'unavailable',readOnly:true}}]
+        }
+        const base=snapshot.diagnostics.filter(item=>item.context?.source!=='local-read-only-tool' || item.id===request.evidenceId)
+        snapshot={...snapshot,diagnostics:[...collected,...base]};this.snapshot=snapshot
+      }
       const plan=await investigate(request,snapshot,this.engine.capabilities(snapshot,request.appId),this.model,this.progress)
       try { plan.steps=plan.steps.map(step=>{
         const canonical=this.engine.validateStep(step,this.snapshot!)

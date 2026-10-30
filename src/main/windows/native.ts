@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join, resolve, sep } from 'node:path'
 
-export const SCRIPT_NAMES = ['scan.ps1', 'user.ps1', 'stock-icon.ps1'] as const
+export const SCRIPT_NAMES = ['scan.ps1', 'user.ps1', 'stock-icon.ps1', 'diagnostics.ps1'] as const
 export type ScriptName = (typeof SCRIPT_NAMES)[number]
 
 export const USER_OPERATIONS = [

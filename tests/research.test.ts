@@ -75,6 +75,15 @@ describe('research call sequencing and citations', () => {
     expect(query).not.toContain('service startup')
   })
 
+  it('includes fresh local tool observations beside selected evidence and redacts their details',async()=>{
+    const s=stub([{text:'R',citations:[{url:OFFICIAL,title:'MS'}]},{text:draftJson},{text:reviewJson(OFFICIAL)}])
+    const current=snapshot()
+    current.diagnostics.unshift({id:'local-probe',area:'windows',category:'network',title:'Network observations',severity:'info',observed:'DNS resolved; HTTPS unavailable.',details:['HTTPS probe timed out. access_token=private-diagnostic-token'],context:{source:'local-read-only-tool',tool:'windows_network',readOnly:true}})
+    await investigate({symptom:'DNS fails',evidenceId:'ev-dns'},current,caps,s.model,()=>{})
+    expect(s.seen[0].prompt).toContain('HTTPS probe timed out')
+    expect(s.seen[0].prompt).not.toContain('private-diagnostic-token')
+  })
+
   it('throws an actionable error when the search call fails, without masquerading', async () => {
     const model: ModelClient = { call: vi.fn(async (prompt: string, options?: { search?: boolean }) => { if (options?.search) throw new Error('search offline'); return { text: draftJson, citations: [], raw: {} } }) }
     await expect(investigate({ symptom: 'DNS fails' }, snapshot(), caps, model, () => {})).rejects.toThrow(/Internet research failed/)

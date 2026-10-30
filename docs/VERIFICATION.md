@@ -3,7 +3,7 @@
 Event build: October 30, 2026. These results describe implemented checks, not universal repair coverage.
 
 - TypeScript checks and production Electron/React build passed.
-- 80 automated unit/integration tests cover research sequencing, structured output, official/community source policy, invalid or malicious plans, execution/undo behavior, isolated Firefox/Steam/Obsidian data, protected paths, native argument validation, API failures, and incomplete or failed verification. Five environment-gated tests are skipped in the ordinary test command.
+- 104 automated unit/integration tests cover research sequencing, structured output, official/community source policy, invalid or malicious plans, execution/undo behavior, isolated Firefox/Steam/Obsidian data, protected paths, native argument validation, API failures, and incomplete or failed verification. Eight environment-gated tests are skipped in the ordinary test command.
 - Three gateway tests verify reservations, overspend rejection, retained unknown usage, authentication, allowed routes, token accounting, and provider-key redaction, and fixed-price development image requests.
 - Three native fault tests passed in a disposable GitHub-hosted Windows VM: a real current-user proxy was repaired and restored, W32Time was started and independently checked, and a temporary startup registry value was disabled and restored. They are guarded against execution on a developer host.
 - Live Muse Spark search, structured drafting, independent review, execution, verification, and restoration passed for an isolated Windows proxy state. This case is a filesystem lab, distinct from the real Windows proxy test above.
@@ -21,3 +21,5 @@ The release is unsigned. No signing certificate or model key is included in the 
 
 The true-black UI update adds native program icon checks: Firefox, Steam, and Obsidian icons were extracted from installed programs, and the Windows generic application icon was read through SHGetStockIconInfo. Unit checks cover discovered-ID access, caching, UNC/URL rejection, links, Store asset confinement, and malformed output. The icon export tool validates every PNG frame and ICO offset.
 
+
+Live Meta function-calling and actual read-only Windows service/network probes passed. [Tool coverage and limits](TOOLS.md) and [recorded local observations](live-tool-results.json) describe the new functionality. The isolated UI harness also verified native-icon image loading through the bridge, true-black canvas/sidebar, text contrast (minimum 5.92:1 in tested states), no repeated navigation/app-selection animation, reduced motion, and no horizontal overflow at 100%, 150%, and 200% renderer zoom. These fixture checks do not imply exhaustive testing of every possible diagnostic state or physical display configuration.

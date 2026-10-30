@@ -15,13 +15,19 @@ ipcMain.handle('pocketbench:app-icon',()=>fixtureIcon);
 for(const name of ['scan','investigate','apply','undo','save-key','clear-key','open-external'])ipcMain.handle('pocketbench:'+name,()=>{throw Error('Isolated UI QA: host operations unavailable')});
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 app.whenReady().then(async()=>{
- const window=new BrowserWindow({show:false,width:1340,height:880,webPreferences:{preload:path.join(process.cwd(),'out/preload/index.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
+ const window=new BrowserWindow({show:false,width:1340,height:880,webPreferences:{preload:path.join(process.cwd(),'out/preload/index.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:false}});
  const errors=[];window.webContents.on('console-message',(event,...args)=>{const detail=args.find(value=>value&&typeof value==='object'&&value.message)||event;if(detail.level==='error'||detail.level===3)errors.push(detail.message)});
- await window.loadFile(path.join(process.cwd(),'out/renderer/index.html'));await pause(400);
+ await window.loadFile(path.join(process.cwd(),'out/renderer/index.html'));
  const check=async(code)=>{try{return await window.webContents.executeJavaScript(code)}catch(error){fs.writeFileSync('.local/ui-qa-failed-js.txt',code);fs.writeFileSync('.local/ui-qa-dom.txt',await window.webContents.executeJavaScript('document.body.innerText'));throw error}};
+ const until=async(code,label)=>{const deadline=Date.now()+8000;while(Date.now()<deadline){if(await check(code))return;await pause(50)}throw Error('UI did not finish loading: '+label)};
+ await until("Boolean(document.querySelector('.pb-page-view'))",'initial state');await pause(260);
  const results={mode:'Isolated UI fixtures. No host repairs or API calls.',normal:await check("({name:getComputedStyle(document.querySelector('.pb-page-view')).animationName,duration:getComputedStyle(document.querySelector('.pb-page-view')).animationDuration})"),routes:[],scaling:[]};
+ // Hidden Chromium windows can pause animation clocks. Finish only initial entry before testing navigation.
+ await check("document.querySelector('.pb-page-view').getAnimations().forEach(animation=>animation.finish())");
  for(const label of ['Windows','Apps','Activity','Settings','Overview']){
-  await check("document.querySelector('button[aria-label=\""+label+"\"]').click()");await pause(260);
+  await check("document.querySelector('button[aria-label=\""+label+"\"]').click()");
+  const expected=label==='Windows'?'Windows diagnostics':label==='Apps'?'Applications':label;
+  await until("document.querySelector('h1')?.textContent === "+JSON.stringify(expected),label);await pause(260);
   const observed=await check("({title:document.querySelector('h1').textContent,animation:getComputedStyle(document.querySelector('.pb-page-view')).animationName,overflow:document.documentElement.scrollWidth>innerWidth})");
   if(observed.overflow)throw Error('Horizontal viewport overflow at '+label);
   observed.contrast=await check(fs.readFileSync(path.join(__dirname,'contrast-check.js'),'utf8'));
@@ -30,8 +36,8 @@ app.whenReady().then(async()=>{
   if(observed.navigationReplayed)throw Error('Frequent navigation replayed an animation');
   results.routes.push(observed);
   if(label==='Apps'){
-   await check("document.querySelector('.pb-app-entry').click()");await pause(80);
-   await pause(200);
+   await check("document.querySelector('.pb-app-entry').click()");
+   await until("document.querySelectorAll('.pb-program-icon img').length===3",'program icons');
    results.appSelection=await check("({heading:document.querySelector('.pb-inspector-heading h2').textContent,animation:getComputedStyle(document.querySelector('.pb-inspector-content')).animationName,iconsLoaded:document.querySelectorAll('.pb-program-icon img').length})");
   }
  }

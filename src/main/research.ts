@@ -183,7 +183,8 @@ function resolveEvidence(request: InvestigateRequest, snapshot: SystemSnapshot, 
     // Windows-level symptom with app-scoped evidence: keep it, but do not grant app authority.
   }
   void targetName
-  return [evidence]
+  const local=snapshot.diagnostics.filter(item=>item.context?.source==='local-read-only-tool' && (!request.appId || item.appId===request.appId) && item.id!==evidence.id)
+  return [evidence,...local].slice(0,6)
 }
 
 function sanitizedContext(snapshot: SystemSnapshot, request: InvestigateRequest, appId?: string): string {
@@ -208,7 +209,7 @@ function researchPrompt(symptom: string, target: { name: string }, context: stri
     : name.includes('obsidian') ? `site:help.obsidian.md Obsidian ${issue}`
     : name === 'windows' ? `(site:support.microsoft.com OR site:learn.microsoft.com) ${windowsTopic}`
     : `${sanitizeLine(target.name,100)} official support ${issue}`
-  const ev = evidence.slice(0, 5).map(d => `- [${sanitizeLine(d.id, 60)}] ${sanitizeLine(d.title, 120)} (${sanitizeLine(d.severity, 20)}): ${sanitizeLine(d.observed, 300)}`).join('\n') || '(no snapshot evidence)'
+  const ev = evidence.slice(0, 6).map(d => `- [${sanitizeLine(d.id, 60)}] ${sanitizeLine(d.title, 120)} (${sanitizeLine(d.severity, 20)}): ${sanitizeLine(d.observed, 300)}${d.context?.source==='local-read-only-tool'?'\n  '+d.details.slice(0,10).map(detail=>sanitizeLine(detail,350)).join('\n  '):''}`).join('\n') || '(no snapshot evidence)'
   return [
     `Investigate this Windows repair issue using web search results. Target: ${sanitizeLine(target.name, 120)}. Symptom: ${sanitizeLine(symptom, 1000)}`,
     '',

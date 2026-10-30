@@ -5,12 +5,13 @@ The renderer uses React and Fluent UI through a sandboxed, context-isolated Elec
 ## Repair flow
 
 1. Scan Windows and installed applications without changing settings.
-2. Research the symptom and installed version using Muse Spark 1.3 Standard and Meta web search. Redact credentials and user identifiers before transmission.
-3. Produce structured steps using the available local capabilities.
-4. Review applicability, source quality, security implications, and verification independently. Source identities are derived from actual search citations, not model labels. Community evidence needs corroboration from independent publishers.
-5. Validate operations and discovered targets locally. The renderer can apply only a stored plan ID. Arbitrary shell text is never an execution interface.
-6. Disclose interruption, privileges, affected resources, and backup coverage. Revalidate before applying.
-7. Execute fixed local operations, save receipts, and independently check postconditions. Command success alone cannot produce a Fixed result.
+2. Let the bounded diagnostic agent choose strict read-only network, service, and event functions. Validate arguments locally, minimize observations, and feed paired results back through Meta Responses. No mutation is available in this phase.
+3. Research the symptom and installed version using Muse Spark 1.3 Standard and Meta web search. Redact credentials and user identifiers before transmission.
+4. Produce structured steps using the available local capabilities.
+5. Review applicability, source quality, security implications, and verification independently. Source identities are derived from actual search citations, not model labels. Community evidence needs corroboration from independent publishers.
+6. Validate operations and discovered targets locally. The renderer can apply only a stored plan ID. Arbitrary shell text is never an execution interface.
+7. Disclose interruption, privileges, affected resources, and backup coverage. Revalidate before applying.
+8. Execute fixed local operations, save receipts, and independently check postconditions. Command success alone cannot produce a Fixed result.
 
 Backups restore supported settings and quarantined caches. System and package repair operations do not promise complete reversal. A reboot-dependent repair remains Pending verification.
 
@@ -23,3 +24,5 @@ The $90 gateway cap governs requests made through this application; unrelated us
 ## Development isolation
 
 Host development uses read-only scans and disposable application-data labs. Native mutation tests are additionally guarded to run only in GitHub-hosted disposable Windows runners, with original state restored in finally blocks. Public CI receives no API key. Live research tests use the local metered gateway and do not execute changes against the developer's Windows installation.
+
+Development branding requests can use Muse Image through the same gateway, with one image per request and a fixed per-image reservation. That endpoint is disabled for the distributed repair client. User credentials are never included in the renderer or packages.

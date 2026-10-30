@@ -15,6 +15,7 @@ export interface PlanDetailProps {
 function domain(value:string):string { try { return new URL(value).hostname; } catch { return value; } }
 export function PlanDetail({plan,busy,latestRun,onApply,onOpenExternal}:PlanDetailProps):React.ReactElement {
   const applying=busy.applyingPlanId===plan.id;
+  const localChecks=plan.evidence.filter(item=>item.context?.source==='local-read-only-tool' && item.context?.tool);
   const canApply=plan.status==='ready' && !busy.applyingPlanId && !busy.scan && !busy.investigating && !latestRun;
   return (
     <section className="pb-section pb-plan-panel" aria-label={'Repair plan: '+plan.title}>
@@ -23,6 +24,7 @@ export function PlanDetail({plan,busy,latestRun,onApply,onOpenExternal}:PlanDeta
         <div className="pb-plan-main">
           <p>{plan.summary}</p>
           <p className="pb-note">{plan.reason}</p>
+          {localChecks.length>0&&<p className="pb-note"><strong>{localChecks.length} local diagnostic {localChecks.length===1?'check':'checks'}</strong> collected before research. Read-only observations are included in Diagnostic evidence below.</p>}
           <h3>What will change</h3>
           {!plan.steps.length?<p className="pb-note">No executable repair is available for this plan.</p>:<ol className="pb-list">{plan.steps.map((step,index)=><li key={step.id} className="pb-plan-step"><div className="pb-row-title"><span className="pb-step-number">{String(index+1).padStart(2,'0')}</span>{step.title}</div><p className="pb-row-sub">{step.impact}</p><div className="pb-step-flags"><Badge appearance="outline" color="subtle">{step.reversible?'Backup & undo supported':'Cannot be undone'}</Badge><Badge appearance="outline" color="subtle">{step.requiresAdmin?'Windows admin approval':'Current user'}</Badge></div><details className="pb-technical"><summary>Verification & technical details</summary><p>{step.verification}</p><code>{step.operation} · {step.targetId}</code></details></li>)}</ol>}
           <details className="pb-technical"><summary>Diagnostic evidence ({plan.evidence.length})</summary>{!plan.evidence.length?<p>No linked scan evidence. This investigation used the reported symptom.</p>:<ul className="pb-list">{plan.evidence.map(item=><li className="pb-row" key={item.id}><div className="pb-row-main"><div className="pb-row-title">{item.title}</div><div className="pb-row-sub">{item.observed}</div><ul className="pb-detail-list">{item.details.map((detail,index)=><li key={index}>{detail}</li>)}</ul></div></li>)}</ul>}</details>

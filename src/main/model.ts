@@ -8,6 +8,7 @@ import type { BudgetState } from '../shared/contracts'
 export interface ModelResult { text: string; citations: { url: string; title: string }[]; raw: unknown }
 export interface ModelOptions { search?: boolean; system?: string; maxTokens?: number; schema?: Record<string, unknown>; effort?: 'low' | 'medium' }
 export interface ModelClient { call(prompt: string, options?: ModelOptions): Promise<ModelResult> }
+export interface DiagnosticTurnRequest { instructions: string; input: readonly unknown[]; tools: readonly unknown[]; maxOutputTokens: number }
 
 export function redact(text: string): string {
   return text.replace(/\b(?:Bearer\s+)[A-Za-z0-9._~+\/-]+/gi,'Bearer [REDACTED]')
@@ -52,6 +53,20 @@ export class MeteredModel implements ModelClient {
       this.base='http://127.0.0.1:'+address.port
     }
     return {base:this.base!,token:this.token}
+  }
+  async diagnosticTurn(request: DiagnosticTurnRequest): Promise<{output:unknown[]}> {
+    if(typeof request.instructions!=='string' || request.instructions.length>12000 || !Array.isArray(request.input) || request.input.length>40 || !Array.isArray(request.tools) || request.tools.length>4 || !Number.isFinite(request.maxOutputTokens))throw new Error('Invalid bounded diagnostic request')
+    if(Buffer.byteLength(JSON.stringify(request.input),'utf8')>131072)throw new Error('Diagnostic context exceeds its size limit')
+    const {base,token}=await this.connection()
+    const response=await fetch(base+'/v1/responses',{
+      method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({model:'muse-spark-1.3',instructions:redact(request.instructions),input:request.input,tools:request.tools,reasoning:{effort:'low'},max_output_tokens:Math.min(8192,Math.max(512,request.maxOutputTokens)),include:['reasoning.encrypted_content'],store:false}),
+      signal:AbortSignal.timeout(240000)
+    })
+    const raw=await response.json() as any
+    if(!response.ok)throw new Error(redact(raw.error?.message || 'Meta diagnostic request failed ('+response.status+')'))
+    if(raw.status!=='completed' || raw.error || !Array.isArray(raw.output))throw new Error('The diagnostic model turn did not finish. No tool success was assumed.')
+    return {output:raw.output}
   }
   async call(prompt: string, options: ModelOptions = {}): Promise<ModelResult> {
     const {base,token}=await this.connection()
