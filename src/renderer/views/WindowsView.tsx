@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Button } from '@fluentui/react-components';
 import { CheckmarkCircleRegular, DesktopPulseRegular, SearchRegular, WarningRegular } from '@fluentui/react-icons';
-import type { DiagnosticEvidence } from '../../shared/contracts';
+import type { DiagnosticEvidence, SymptomCategory } from '../../shared/contracts';
 import { findPlan, latestRunForPlan, type ViewProps } from '../types';
 import { PlanDetail } from '../components/PlanDetail';
 import { SymptomForm } from '../components/SymptomForm';
@@ -16,6 +16,15 @@ function categoryOf(item: DiagnosticEvidence): string {
   if (/service/.test(value)) return 'services';
   if (/memory|cpu|perform/.test(value)) return 'performance';
   return 'other';
+}
+
+function symptomCategoryOf(item: DiagnosticEvidence): SymptomCategory | undefined {
+  const value = item.category.toLowerCase();
+  if (/network|dns|proxy|connect/.test(value)) return 'connectivity';
+  if (/update/.test(value)) return 'updates';
+  if (/memory|cpu|perform|startup/.test(value)) return 'performance';
+  if (item.area === 'app') return 'app';
+  return undefined;
 }
 
 export function WindowsView(props: ViewProps): React.ReactElement {
@@ -38,7 +47,7 @@ export function WindowsView(props: ViewProps): React.ReactElement {
                 <div className={'pb-finding-icon pb-severity-'+item.severity}>{item.severity==='info' ? <DesktopPulseRegular /> : <WarningRegular />}</div>
                 <div className="pb-row-main"><div className="pb-finding-heading"><span className="pb-row-title">{item.title}</span><span className={'pb-severity-label pb-severity-'+item.severity}>{item.severity==='info'?'Information':item.severity}</span></div><p className="pb-row-sub">{item.observed}</p>
                   <details className="pb-technical"><summary>Technical evidence</summary><ul className="pb-detail-list">{item.details.map((detail,index)=><li key={index}>{detail}</li>)}</ul>{item.suggestedOperation && <code>{item.suggestedOperation}</code>}</details>
-                  <Button appearance="secondary" size="small" disabled={busy.investigating || !state.settings.hasApiKey} onClick={() => void props.onInvestigate({symptom:item.title,evidenceId:item.id})}>Investigate</Button>
+                  <Button appearance="secondary" size="small" disabled={busy.investigating} onClick={() => { const category = symptomCategoryOf(item); void props.onInvestigate({symptom:item.title,evidenceId:item.id,...(category?{category}:{})}); }}>Investigate</Button>
                 </div>
               </li>)}</ul>}
         </section>

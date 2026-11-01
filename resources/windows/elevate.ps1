@@ -48,6 +48,30 @@ try {
   exit 2
 }
 
+# Progress is advisory only; the final receipt remains execution authority.
+$progressPath = $receiptPath + '.progress'
+$progressStream = [System.IO.File]::Open($progressPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+function Write-RepairProgress([string]$stage, [Nullable[int]]$percent = $null) {
+  $record = @{stage=$stage; percent=$percent} | ConvertTo-Json -Compress
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($record)
+  $progressStream.Position = 0
+  $progressStream.SetLength(0)
+  $progressStream.Write($bytes, 0, $bytes.Length)
+  $progressStream.Flush()
+}
+function Invoke-ServicingCommand([string]$stage, [string]$exe, [string[]]$arguments) {
+  Write-RepairProgress $stage
+  $lines = & $exe @arguments 2>&1 | ForEach-Object {
+    $line = [string]$_
+    if ($line -match '(\d{1,3})(?:[.,]\d+)?\s*%') {
+      $value = [int]$Matches[1]
+      if ($value -le 100) { Write-RepairProgress $stage $value }
+    }
+    $line
+  }
+  return @{output=($lines | Out-String); code=$LASTEXITCODE}
+}
+
 $result = [pscustomobject]@{ operation = $Operation; success = $false; output = ''; pendingReboot = $false; exitCode = 1 }
 
 try {
@@ -70,15 +94,18 @@ try {
     $result.output = "Service $ServiceName status: $($svc.Status)."
   }
   elseif ($Operation -eq 'integrityRepair') {
-    $dism = dism.exe /Online /Cleanup-Image /RestoreHealth 2>&1 | Out-String
-    $dismCode = $LASTEXITCODE
+    $dismRun = Invoke-ServicingCommand 'Repairing Windows component store' 'dism.exe' @('/Online','/Cleanup-Image','/RestoreHealth')
+    $dism = $dismRun.output
+    $dismCode = $dismRun.code
     $sfc = ''
     $sfcCode = 1
     $dismOk = ($dismCode -eq 0)
     if ($dismOk) {
-      $sfc = sfc.exe /scannow 2>&1 | Out-String
-      $sfcCode = $LASTEXITCODE
+      $sfcRun = Invoke-ServicingCommand 'Repairing Windows system files' 'sfc.exe' @('/scannow')
+      $sfc = $sfcRun.output
+      $sfcCode = $sfcRun.code
     }
+    Write-RepairProgress 'Verifying Windows repairs'
     # New read-only post-repair health verification (no repair flags).
     $check = ''
     $verify = ''
@@ -104,6 +131,9 @@ catch {
   $result.output = 'Elevated operation failed: ' + $_.Exception.Message
 }
 
+$progressStream.Close()
+$progressStream.Dispose()
+try { Remove-Item -LiteralPath $progressPath -Force -ErrorAction Stop } catch { }
 $json = $result | ConvertTo-Json -Depth 4 -Compress
 try {
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)

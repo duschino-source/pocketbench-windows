@@ -1,6 +1,6 @@
 {
   "name": "pocketbench",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Windows and application repair powered by Meta Muse Spark",
   "private": true,
   "type": "module",
@@ -20,6 +20,7 @@
   "dependencies": {
     "@fluentui/react-components": "^9.0.0",
     "@fluentui/react-icons": "^2.0.0",
+    "electron-updater": "^6.8.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "^4.0.0"
@@ -72,7 +73,23 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "createDesktopShortcut": true
-    }
+      "createDesktopShortcut": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "duschino-source",
+        "repo": "pocketbench-windows",
+        "releaseType": "draft"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/duschino-source/pocketbench-windows.git"
   }
 }

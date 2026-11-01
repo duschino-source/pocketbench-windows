@@ -36,7 +36,8 @@ function text(value: unknown, limit: number): string {
   return minimizeDiagnosticText(typeof value === 'string' ? value : '', limit).replace(/[\u0000-\u001f\u007f]+/g, ' ')
 }
 
-// The exported tool schemas are the single parameter authority, including for injected tools.
+// The transport schema is the parameter authority: the legacy three functions.
+// The extended five are invoked only by deterministic category routing.
 function validateArguments(name: string, args: unknown): void {
   const definition = DIAGNOSTIC_TOOL_DEFINITIONS.find(tool => tool.name === name)
   if (!definition) throw new Error('Unknown diagnostic function.')
@@ -57,11 +58,21 @@ function boundedResult(result: DiagnosticResult, name: string): Omit<DiagnosticR
   return { tool: name, timestamp: new Date(result.timestamp).toISOString(), scope: text(result.scope, 180), status: result.status, observations: result.observations.slice(0, 12).map(line => text(line, 350)).filter(Boolean) }
 }
 
+const TOOL_EVIDENCE: Record<string, { category: string; title: string; area: 'windows' | 'app' }> = {
+  windows_network: { category: 'network', title: 'Read-only network observations', area: 'windows' },
+  windows_service: { category: 'service', title: 'Read-only service observations', area: 'windows' },
+  windows_events: { category: 'events', title: 'Recent Windows error observations', area: 'windows' },
+  windows_update_readiness: { category: 'updates', title: 'Read-only Windows Update readiness observations', area: 'windows' },
+  windows_resource_pressure: { category: 'performance', title: 'Read-only resource pressure observations', area: 'windows' },
+  windows_storage: { category: 'storage', title: 'Read-only volume and cache storage observations', area: 'windows' },
+  windows_startup: { category: 'startup', title: 'Read-only startup inventory observations', area: 'windows' },
+  app_health: { category: 'app', title: 'Read-only application health observations', area: 'app' },
+}
+
 function evidenceFor(result: Omit<DiagnosticResult, 'data'>, appId?: string): DiagnosticEvidence {
-  const category = result.tool === 'windows_network' ? 'network' : result.tool === 'windows_service' ? 'service' : 'events'
-  const title = result.tool === 'windows_network' ? 'Read-only network observations' : result.tool === 'windows_service' ? 'Read-only service observations' : 'Recent Windows error observations'
+  const info = TOOL_EVIDENCE[result.tool] ?? { category: 'diagnostics', title: 'Read-only diagnostic observations', area: 'windows' as const }
   return {
-    id: 'diagnostic-' + randomUUID(), area: 'windows', category, title,
+    id: 'diagnostic-' + randomUUID(), area: info.area, category: info.category, title: info.title,
     severity: 'info',
     observed: result.observations[0] || `Diagnostic status: ${result.status}. No successful observation was returned.`,
     details: [`Scope: ${result.scope}`, `Collected: ${result.timestamp}; status: ${result.status}.`, ...result.observations.slice(1)],
@@ -125,7 +136,7 @@ export async function runDiagnosticAgent(options: DiagnosticAgentOptions): Promi
         try {
           const args: unknown = JSON.parse(call.arguments as string)
           validateArguments(name, args)
-          progress(`Reading ${name === 'windows_network' ? 'network state and allow-listed reachability' : name === 'windows_service' ? 'selected Windows service details' : 'recent Windows event errors'}…`)
+          progress(`Reading ${name === 'windows_network' ? 'network state and allow-listed reachability' : name === 'windows_service' ? 'selected Windows service details' : name === 'windows_events' ? 'recent Windows event errors' : name === 'windows_update_readiness' ? 'pending-restart and servicing readiness' : name === 'windows_resource_pressure' ? 'bounded CPU and memory samples' : name === 'windows_storage' ? 'volumes and fixed cache roots' : name === 'windows_startup' ? 'read-only startup inventory' : 'known application running and profile state'}…`)
           result.toolCalls++
           let observation: Omit<DiagnosticResult, 'data'>
           try { observation = boundedResult(await tools.invoke(name, args), name) }

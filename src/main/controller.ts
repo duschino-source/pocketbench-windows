@@ -7,14 +7,28 @@ import type { MeteredModel } from './model'
 import { investigate } from './research'
 import { runDiagnosticAgent } from './diagnostic-agent'
 import { redact } from './model'
+import { createDiagnosticTools } from './diagnostics'
+import type { AppFamily } from './diagnostics'
+import { createLocalInvestigation, OFFLINE_OBSERVATION_MAX_AGE_MS } from './local-investigation'
+import { classifySymptomCategory } from '../shared/investigation'
 
 export class Controller {
   private snapshot: SystemSnapshot | null = null
   private plans: RepairPlan[] = []
   private history: RepairRun[] = []
   private busy = false
+  private scanAbort:AbortController|null=null
+  private startedAt:string|undefined
+  isBusy():boolean {return this.busy}
+  cancelOperation():void {
+    if(!this.scanAbort)throw new Error("This operation cannot be stopped safely. Wait for verification to finish.")
+    this.scanAbort.abort()
+  }
+  private progress(event:ProgressEvent):void {
+    this.emitProgress({...event,startedAt:this.startedAt,cancellable:Boolean(this.scanAbort),cancellationReason:this.scanAbort?undefined:"This operation must finish before changes or updates can proceed."})
+  }
   private file: string
-  constructor(private directory: string, private engine: WindowsEngine, private model: MeteredModel, private settings: () => AppSettings, private progress: (event: ProgressEvent) => void) {
+  constructor(private directory: string, private engine: WindowsEngine, private model: MeteredModel, private settings: () => AppSettings, private emitProgress: (event: ProgressEvent) => void) {
     mkdirSync(directory,{recursive:true});this.file=join(directory,'state.json')
     if (existsSync(this.file)) {
       try {
@@ -31,13 +45,17 @@ export class Controller {
   }
   private async exclusive<T>(action: () => Promise<T>): Promise<T> {
     if (this.busy) throw new Error('Another operation is in progress. Wait for it to finish.')
-    this.busy=true;try { return await action() } finally { this.busy=false }
+    this.busy=true;this.startedAt=new Date().toISOString();try { return await action() } finally { this.busy=false;this.scanAbort=null;this.startedAt=undefined }
   }
-  async state(): Promise<AppState> { return {snapshot:this.snapshot,plans:this.plans,history:this.history,settings:this.settings(),budget:await this.model.budget()} }
-  async scan(): Promise<SystemSnapshot> {
+  async state(): Promise<AppState> { return {snapshot:this.snapshot,plans:this.plans,history:this.history,settings:this.settings(),budget:await this.model.budget()} }  async scan(): Promise<SystemSnapshot> {
     return this.exclusive(async()=> {
-      this.progress({phase:'scan',message:'Reading Windows diagnostics and installed applications…'})
-      const snapshot=await this.engine.scan();this.snapshot=snapshot
+      this.scanAbort=new AbortController()
+      this.progress({phase:'scan',message:'Reading Windows health…'})
+      const snapshot=await this.engine.scan(partial=>{
+        this.snapshot=partial
+        this.progress({phase:'scan',message:'Windows findings are ready. Checking installed app repair capabilities…',snapshot:partial})
+      },this.scanAbort.signal);this.snapshot=snapshot
+      this.scanAbort=null
       const bootTime=Date.now()-snapshot.machine.uptime*1000
       for (const run of this.history.filter(run=>run.status==='pending-verification' && run.finishedAt && Date.parse(run.finishedAt)<bootTime)) {
         const checks=[]
@@ -51,14 +69,46 @@ export class Controller {
   async investigate(request: InvestigateRequest): Promise<RepairPlan> {
     return this.exclusive(async()=> {
       if (!request || typeof request.symptom!=='string' || request.symptom.trim().length<3 || request.symptom.length>4000) throw new Error('Describe the problem using 3–4000 characters.')
+      if(request.category && !['performance','connectivity','updates','app'].includes(request.category))throw new Error('Unknown symptom category.')
       let snapshot=this.snapshot || await this.engine.scan();this.snapshot=snapshot
       if (request.appId && !snapshot.apps.some(app=>app.id===request.appId)) throw new Error('This application is no longer in the inventory. Scan again.')
-      if(!snapshot.labMode && typeof this.model.diagnosticTurn==='function') {
+      let localPlan:RepairPlan|null=null
+      const structuredCategory = request.category
+        ? (request.category==='connectivity'?'network':request.category)
+        : (!snapshot.labMode ? (():string=>{const classified=classifySymptomCategory(request.symptom,request.appId);return classified==='connectivity'?'network':classified})() : undefined)
+      if(structuredCategory && !snapshot.labMode) {
+        const selected=snapshot.apps.find(app=>app.id===request.appId)
+        this.progress({phase:'research',message:'Running focused local checks before AI research...'})
+        let local:{evidence:DiagnosticEvidence[];unavailable:string[];plan:RepairPlan|null}
+        if(structuredCategory==='app' && (!selected || selected.family==='other')) {
+          const observation:DiagnosticEvidence={id:'local-app-unavailable',area:'app',category:'app',title:'Read-only application health observations',severity:'info',observed:'The selected application family is not supported by a read-only probe. No unrelated application was inspected.',details:['No applicable offline repair was established.'],...(request.appId?{appId:request.appId}:{}),context:{source:'local-read-only-tool',tool:'app_health',status:'unavailable',readOnly:true}}
+          local={evidence:[observation],unavailable:['app_health'],plan:null}
+          snapshot={...snapshot,diagnostics:[observation,...snapshot.diagnostics.filter(item=>item.context?.source!=='local-read-only-tool')]};this.snapshot=snapshot
+        } else {
+          const family:AppFamily|null|undefined = selected?.family==='other' ? null : selected?.family as AppFamily|undefined
+          const investigated=await createLocalInvestigation({tools:createDiagnosticTools()}).investigate({category:structuredCategory as 'performance'|'network'|'updates'|'app',appId:request.appId,appFamily:family})
+          snapshot={...snapshot,diagnostics:[...investigated.evidence,...snapshot.diagnostics.filter(item=>item.context?.source!=='local-read-only-tool')]};this.snapshot=snapshot
+          local={evidence:investigated.evidence,unavailable:investigated.unavailable,plan:investigated.plan}
+        }
+        localPlan=local.plan
+        if(localPlan) {
+          const fresh=await this.engine.scan()
+          const step=localPlan.steps[0]
+          const service=fresh.services.find(service=>service.name===step.targetId)
+          if(service?.status.toLowerCase()==='stopped' && /^(auto|automatic)$/i.test(service.startType) && service.triggerStart!==true) {
+            localPlan.steps=[this.engine.validateStep(step,fresh)]
+            localPlan.status='ready';localPlan.reason='A tested local rule matched a stopped automatic service. Apply fix starts only this service.'
+            localPlan.review={approved:true,rationale:'Local catalog rule and fresh native preconditions validated; independent verification remains required.',concerns:[]}
+          } else localPlan=null
+        }
+        if(!localPlan && !this.settings().hasApiKey) localPlan={id:randomUUID(),createdAt:new Date().toISOString(),title:'Local checks complete',summary:'Review the local observations. No applicable offline repair was established.',target:{kind:request.appId?'app':'windows',id:request.appId,name:selected?.name||'Windows'},status:'needs-validation',reason:'Connect Meta for deeper research. No change is authorized by these observations.',evidence:local.evidence,sources:[],steps:[],review:{approved:false,rationale:'No tested offline rule matched.',concerns:local.unavailable}}
+      }
+      if(!request.category && !snapshot.labMode && this.settings().hasApiKey && typeof this.model.diagnosticTurn==='function') {
         const selected=snapshot.apps.find(app=>app.id===request.appId)
         const context=JSON.stringify({os:snapshot.machine.os,target:selected?{name:selected.name,version:selected.version}:'Windows',services:snapshot.services.map(service=>({name:service.name,status:service.status,startType:service.startType}))})
         let collected:DiagnosticEvidence[]=[]
         try {
-          const diagnostic=await runDiagnosticAgent({symptom:request.symptom,context,appId:request.appId,transport:turn=>this.model.diagnosticTurn(turn),onProgress:this.progress})
+          const diagnostic=await runDiagnosticAgent({symptom:request.symptom,context,appId:request.appId,transport:turn=>this.model.diagnosticTurn(turn),onProgress:event=>this.progress(event)})
           collected=diagnostic.evidence
           if(diagnostic.issues.length)collected.push({id:'diagnostic-issue-'+randomUUID(),area:'windows',category:'diagnostics',title:'Some local checks were unavailable',severity:'info',observed:'Incomplete checks do not establish a Windows fault.',details:diagnostic.issues.map(issue=>redact(issue).slice(0,300)),...(request.appId?{appId:request.appId}:{}),context:{source:'local-read-only-tool',status:'unavailable',readOnly:true}})
         } catch(error) {
@@ -67,7 +117,7 @@ export class Controller {
         const base=snapshot.diagnostics.filter(item=>item.context?.source!=='local-read-only-tool' || item.id===request.evidenceId)
         snapshot={...snapshot,diagnostics:[...collected,...base]};this.snapshot=snapshot
       }
-      const plan=await investigate(request,snapshot,this.engine.capabilities(snapshot,request.appId),this.model,this.progress)
+      const plan=localPlan || await investigate(request,snapshot,this.engine.capabilities(snapshot,request.appId),this.model,event=>this.progress(event))
       try { plan.steps=plan.steps.map(step=>{
         const canonical=this.engine.validateStep(step,this.snapshot!)
         if(canonical.targetId!==step.targetId)throw new Error('Repair parameters do not match the reviewed target. Research again before applying.')
@@ -92,7 +142,7 @@ export class Controller {
       try {
         for (const step of steps) {
           this.progress({phase:'apply',message:step.title,planId})
-          const execution=await this.engine.execute(step);run.executions.push(execution);this.persist()
+          const execution=await this.engine.execute(step,(message,percent)=>this.progress({phase:'apply',message,percent,planId}));run.executions.push(execution);this.persist()
           if (!execution.success) throw new Error(execution.output || 'The repair operation failed.')
           this.progress({phase:'verify',message:'Independently checking: '+step.verification,planId})
           const verification=await this.engine.verify(step,execution);run.verification.push(verification);this.persist()

@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import { hostname, userInfo } from 'node:os';
 import { redact } from './model';
 import { runScript, SELECTED_SERVICES } from './windows/native';
+import { SECURITY_STARTUP_PATTERN } from './windows/policy';
 import type { JsonValue } from '../shared/contracts';
 
 export const ALLOWED_HOSTS = [
@@ -22,6 +23,42 @@ const PROBE_TIMEOUT_MS = 4000;
 const MAX_EVENTS = 8;
 const MAX_MESSAGE_CHARS = 350;
 const MAX_OUTPUT_CHARS = 12000;
+const MAX_TOP_CONTRIBUTORS = 5;
+const MAX_VOLUMES = 8;
+const MAX_STORAGE_ROOTS = 12;
+const MAX_STARTUP_ENTRIES = 50;
+const MAX_PROCESS_COUNT = 64;
+
+/** Known application families only. No free-form app name or path is ever accepted. */
+export const APP_FAMILIES = ['firefox', 'steam', 'obsidian'] as const;
+export type AppFamily = (typeof APP_FAMILIES)[number];
+
+/** Fixed cache roots; the native script has the matching hard-coded allow-list. */
+export const STORAGE_CACHE_ROOT_IDS = [
+  'firefox-cache2',
+  'firefox-startupcache',
+  'firefox-shader-cache',
+  'firefox-thumbnails',
+  'steam-htmlcache',
+  'steam-appcache',
+  'steam-shadercache',
+  'obsidian-Cache',
+  'obsidian-CodeCache',
+  'obsidian-GPUCache',
+] as const;
+
+export const UPDATE_SERVICES = ['wuauserv', 'BITS', 'Winmgmt', 'TrustedInstaller'] as const;
+export const STARTUP_LOCATIONS = [
+  'HKCU Run',
+  'HKLM Run',
+  'HKCU RunOnce',
+  'HKLM RunOnce',
+  'Startup folder (user)',
+  'Startup folder (common)',
+] as const;
+
+const SERVICE_STATUS_VALUES = ['Running', 'Stopped', 'StartPending', 'StopPending', 'ContinuePending', 'PausePending', 'Paused'] as const;
+const SERVICE_START_MODES = ['Auto', 'Automatic', 'Manual', 'Disabled', 'Boot', 'System'] as const;
 const localIdentities: string[] = [];
 try { localIdentities.push(hostname(), userInfo().username); } catch { /* Identity lookup is optional; paths and account fields are still minimized. */ }
 
@@ -87,6 +124,94 @@ export const DIAGNOSTIC_TOOL_DEFINITIONS: ToolDefinition[] = [
   },
 ];
 
+/**
+ * Additional bounded, read-only diagnostics. Kept separate so the original
+ * three-tool export remains exactly backwards compatible for existing callers.
+ */
+export const EXTENDED_DIAGNOSTIC_TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    type: 'function',
+    name: 'windows_update_readiness',
+    description: 'Read-only Windows Update readiness: pending-restart flags, fixed servicing services, and recent update errors.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        hours: { type: 'integer', minimum: 1, maximum: 24 },
+        maxEvents: { type: 'integer', minimum: 1, maximum: 8 },
+      },
+      required: ['hours', 'maxEvents'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'windows_resource_pressure',
+    description: 'Bounded read-only CPU and memory sampling over a short fixed duration with top contributors. Never stops a process.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        durationSeconds: { type: 'integer', minimum: 1, maximum: 5 },
+        sampleCount: { type: 'integer', minimum: 2, maximum: 5 },
+      },
+      required: ['durationSeconds', 'sampleCount'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'windows_storage',
+    description: 'Read-only volume availability plus bounded traversal of fixed allow-listed application cache roots. Reparse points are skipped and no caller path is accepted.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxEntries: { type: 'integer', minimum: 1, maximum: 50 },
+      },
+      required: ['maxEntries'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'windows_startup',
+    description: 'Read-only startup inventory with name, publisher, location and protection flag. Never enables, disables, or edits an entry.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxEntries: { type: 'integer', minimum: 1, maximum: 50 },
+      },
+      required: ['maxEntries'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'app_health',
+    description: 'Read-only running state and known-profile ambiguity for Firefox, Steam, or Obsidian. Never reads notes, cookies, profile files, or logs.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        app: { type: 'string', enum: [...APP_FAMILIES] },
+      },
+      required: ['app'],
+    },
+  },
+];
+
+/** Complete model-facing catalogue: legacy three functions followed by the extended five. */
+export const ALL_DIAGNOSTIC_TOOL_DEFINITIONS: ToolDefinition[] = [
+  ...DIAGNOSTIC_TOOL_DEFINITIONS,
+  ...EXTENDED_DIAGNOSTIC_TOOL_DEFINITIONS,
+];
+
+export type DiagnosticToolDefinition = ToolDefinition;
+
+
 export interface DiagnosticResult {
   tool: string;
   timestamp: string;
@@ -104,7 +229,15 @@ export interface NetworkProbeResult {
   note?: string;
 }
 
-export type NativeOperation = 'networkState' | 'service' | 'events';
+export type NativeOperation =
+  | 'networkState'
+  | 'service'
+  | 'events'
+  | 'updateReadiness'
+  | 'resourcePressure'
+  | 'storage'
+  | 'startup'
+  | 'appHealth';
 
 export interface DiagnosticToolOptions {
   nativeRunner?: (
@@ -119,8 +252,26 @@ export interface DiagnosticToolOptions {
   probeTimeoutMs?: number;
 }
 
-type ToolName = 'windows_network' | 'windows_service' | 'windows_events';
-const TOOL_NAMES: readonly ToolName[] = ['windows_network', 'windows_service', 'windows_events'];
+export type DiagnosticToolName =
+  | 'windows_network'
+  | 'windows_service'
+  | 'windows_events'
+  | 'windows_update_readiness'
+  | 'windows_resource_pressure'
+  | 'windows_storage'
+  | 'windows_startup'
+  | 'app_health';
+type ToolName = DiagnosticToolName;
+const TOOL_NAMES: readonly ToolName[] = [
+  'windows_network',
+  'windows_service',
+  'windows_events',
+  'windows_update_readiness',
+  'windows_resource_pressure',
+  'windows_storage',
+  'windows_startup',
+  'app_health',
+];
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
@@ -171,6 +322,61 @@ function validateArgs(name: ToolName, args: unknown): Record<string, unknown> {
           if (!isIntInRange(value, 1, 8)) throw new Error('maxEvents must be an integer 1..8.');
         } else {
           throw new Error(`Unexpected argument for windows_events: ${key}`);
+        }
+      },
+    },
+    windows_update_readiness: {
+      required: ['hours', 'maxEvents'],
+      check: (key, value) => {
+        if (key === 'hours') {
+          if (!isIntInRange(value, 1, 24)) throw new Error('hours must be an integer 1..24.');
+        } else if (key === 'maxEvents') {
+          if (!isIntInRange(value, 1, 8)) throw new Error('maxEvents must be an integer 1..8.');
+        } else {
+          throw new Error(`Unexpected argument for windows_update_readiness: ${key}`);
+        }
+      },
+    },
+    windows_resource_pressure: {
+      required: ['durationSeconds', 'sampleCount'],
+      check: (key, value) => {
+        if (key === 'durationSeconds') {
+          if (!isIntInRange(value, 1, 5)) throw new Error('durationSeconds must be an integer 1..5.');
+        } else if (key === 'sampleCount') {
+          if (!isIntInRange(value, 2, 5)) throw new Error('sampleCount must be an integer 2..5.');
+        } else {
+          throw new Error(`Unexpected argument for windows_resource_pressure: ${key}`);
+        }
+      },
+    },
+    windows_storage: {
+      required: ['maxEntries'],
+      check: (key, value) => {
+        if (key === 'maxEntries') {
+          if (!isIntInRange(value, 1, 50)) throw new Error('maxEntries must be an integer 1..50.');
+        } else {
+          // No path, root, glob, drive, or scope argument is ever accepted.
+          throw new Error(`Unexpected argument for windows_storage: ${key}`);
+        }
+      },
+    },
+    windows_startup: {
+      required: ['maxEntries'],
+      check: (key, value) => {
+        if (key === 'maxEntries') {
+          if (!isIntInRange(value, 1, 50)) throw new Error('maxEntries must be an integer 1..50.');
+        } else {
+          throw new Error(`Unexpected argument for windows_startup: ${key}`);
+        }
+      },
+    },
+    app_health: {
+      required: ['app'],
+      check: (key, value) => {
+        if (key === 'app') {
+          if (!(APP_FAMILIES as readonly string[]).includes(value as string)) throw new Error('Unsupported application family.');
+        } else {
+          throw new Error(`Unexpected argument for app_health: ${key}`);
         }
       },
     },
@@ -506,10 +712,12 @@ async function runService(
     }
     const statusText = ['Running', 'Stopped', 'StartPending', 'StopPending', 'ContinuePending', 'PausePending', 'Paused'].includes(String(raw.statusText)) ? String(raw.statusText) : 'Unknown';
     const startMode = ['Auto', 'Automatic', 'Manual', 'Disabled', 'Boot', 'System'].includes(String(raw.startMode)) ? String(raw.startMode) : undefined;
+    const triggerStart = typeof (raw as Record<string, unknown>).triggerStart === 'boolean' ? (raw as Record<string, unknown>).triggerStart as boolean : undefined;
     const eventsAvailable = Array.isArray(raw.events) && raw.eventStatus !== 'unavailable' && raw.eventStatus !== 'error';
     const events = normalizeEvents(raw.events, maxEvents);
     const observations = [
       `Service ${serviceName} status: ${safeShort(statusText)}${startMode ? ` (start mode ${safeShort(startMode)})` : ''}.`,
+      ...(triggerStart === true ? ['This service uses trigger-start; a stopped state is expected and does not establish a fault.'] : []),
       !eventsAvailable ? 'Related service events could not be read; absence of errors was not established.' : events.length > 0
         ? `Found ${events.length} related service event(s) in the last ${hours} hour(s).`
         : `No matching service events among at most 200 recent SCM candidates in the last ${hours} hour(s).`,
@@ -523,6 +731,7 @@ async function runService(
       events: events.map((event) => ({ id: event.id, time: event.time, message: event.message })),
     };
     if (startMode) data.startMode = safeShort(startMode);
+    if (triggerStart !== undefined) data.triggerStart = triggerStart;
     const status = statusText === 'Unknown' ? 'unavailable' : raw.status === 'partial' || !startMode || !eventsAvailable ? 'partial' : 'ok';
     return enforceBound({ tool: 'windows_service', timestamp: now(), scope, status, observations, data });
   } catch (error) {
@@ -599,6 +808,482 @@ async function runEvents(
   }
 }
 
+function boundedNumber(value: unknown, min: number, max: number): number | undefined {
+  const n = toNumber(value);
+  return n !== undefined && n >= min && n <= max ? n : undefined;
+}
+
+function boundedInteger(value: unknown, min: number, max: number): number | undefined {
+  const n = toNumber(value);
+  return n !== undefined && Number.isInteger(n) && n >= min && n <= max ? n : undefined;
+}
+
+function safeToken(value: unknown, pattern: RegExp, max = 64): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const cleaned = safeShort(value, max);
+  return cleaned && pattern.test(cleaned) ? cleaned : undefined;
+}
+
+function serviceStatus(value: unknown): string | undefined {
+  return typeof value === 'string' && (SERVICE_STATUS_VALUES as readonly string[]).includes(value) ? value : undefined;
+}
+
+function serviceStartMode(value: unknown): string | undefined {
+  return typeof value === 'string' && (SERVICE_START_MODES as readonly string[]).includes(value) ? value : undefined;
+}
+
+interface Contributor {
+  name: string;
+  value: number;
+}
+
+function normalizeContributors(raw: unknown, key: 'cpuSeconds' | 'workingSetBytes'): Contributor[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const rows: Contributor[] = [];
+  for (const item of raw.slice(0, MAX_TOP_CONTRIBUTORS)) {
+    const record = asRecord(item);
+    const name = safeToken(record.name, /^[A-Za-z0-9._ -]{1,64}$/);
+    const value = boundedNumber(record[key], 0, key === 'cpuSeconds' ? 1e9 : 1e15);
+    if (!name || value === undefined || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    rows.push({ name, value: Math.round(value * 1000) / 1000 });
+  }
+  return rows;
+}
+
+function nativeStatus(raw: Record<string, unknown>): 'ok' | 'partial' | 'unavailable' | 'error' {
+  return raw.status === 'partial' || raw.status === 'unavailable' || raw.status === 'error' ? raw.status : 'ok';
+}
+
+function notesOf(raw: Record<string, unknown>, limit = 3): string[] {
+  return Array.isArray(raw.notes) ? raw.notes.slice(0, limit).map(note => safeMessage(note, 180)) : [];
+}
+
+/** Pending-restart flags, fixed servicing services and recent Windows Update errors. */
+async function runUpdateReadiness(
+  args: Record<string, unknown>,
+  runner: NonNullable<DiagnosticToolOptions['nativeRunner']>,
+  now: () => string,
+  timeoutMs: number,
+): Promise<DiagnosticResult> {
+  const hours = args.hours as number;
+  const maxEvents = args.maxEvents as number;
+  const scope = 'updates:readiness';
+  try {
+    const raw = asRecord(await withTimeout(
+      runner('updateReadiness', { Hours: String(hours), MaxEvents: String(maxEvents) }, timeoutMs),
+      timeoutMs,
+      'update readiness probe',
+    ));
+    const status = nativeStatus(raw);
+    if (status === 'unavailable' || status === 'error') {
+      return enforceBound({
+        tool: 'windows_update_readiness', timestamp: now(), scope, status,
+        observations: [safeMessage(raw.note ?? 'Windows Update readiness data unavailable with the current permissions.')],
+        data: {},
+      });
+    }
+
+    const flagsRaw = asRecord(raw.restartFlags);
+    const restartFlags: Record<string, JsonValue> = {};
+    let flagCount = 0;
+    for (const key of ['cbs', 'windowsUpdate', 'pendingFileRename'] as const) {
+      const value = toBoolean(flagsRaw[key]);
+      if (value === undefined) continue;
+      restartFlags[key] = value;
+      flagCount++;
+      if (value) restartFlags.pending = true;
+    }
+    if (flagCount > 0 && !Object.hasOwn(restartFlags, 'pending')) restartFlags.pending = false;
+
+    const services: Record<string, JsonValue>[] = [];
+    if (Array.isArray(raw.services)) {
+      for (const item of raw.services.slice(0, UPDATE_SERVICES.length)) {
+        const record = asRecord(item);
+        const name = typeof record.name === 'string' && (UPDATE_SERVICES as readonly string[]).includes(record.name) ? record.name : undefined;
+        const serviceState = serviceStatus(record.status);
+        if (!name || !serviceState) continue;
+        const startMode = serviceStartMode(record.startMode);
+        services.push({ name, status: serviceState, ...(startMode ? { startMode } : {}) });
+      }
+    }
+
+    const events = normalizeEvents(raw.events, maxEvents);
+    const eventsAvailable = Array.isArray(raw.events) && raw.eventStatus !== 'unavailable' && raw.eventStatus !== 'error';
+    if (!flagCount && !services.length && !eventsAvailable) {
+      return enforceBound({
+        tool: 'windows_update_readiness', timestamp: now(), scope, status: 'unavailable',
+        observations: ['No restart, servicing, or update-error observation could be established.'],
+        data: {},
+      });
+    }
+
+    const pending = restartFlags.pending === true;
+    const observations = [
+      pending
+        ? 'A pending-restart flag is set for at least one selected Windows servicing indicator.'
+        : flagCount
+          ? 'No pending-restart flag was reported by the selected Windows servicing indicators.'
+          : 'Pending-restart flags could not be read; no restart conclusion is available.',
+      services.length
+        ? services.map(service => `${String(service.name)} is ${String(service.status)}${service.startMode ? ` (${String(service.startMode)})` : ''}.`).join(' ')
+        : 'Selected Windows Update servicing state could not be read.',
+      !eventsAvailable
+        ? 'Recent Windows Update errors could not be read; absence of errors was not established.'
+        : events.length
+          ? `Found ${events.length} recent Windows Update error event(s) in the last ${hours} hour(s).`
+          : `No Windows Update error/critical events in the last ${hours} hour(s).`,
+      ...events.map(event => safeMessage(`Event ${event.id ?? 'unknown'} at ${event.time}: ${event.message}`)),
+      ...notesOf(raw),
+    ];
+    const data: Record<string, JsonValue> = {
+      restartFlags,
+      services,
+      eventCount: events.length,
+      events: events.map(event => ({ id: event.id, time: event.time, message: event.message })),
+    };
+    return enforceBound({
+      tool: 'windows_update_readiness', timestamp: now(), scope,
+      status: status === 'partial' || !flagCount || !services.length || !eventsAvailable ? 'partial' : 'ok',
+      observations, data,
+    });
+  } catch (error) {
+    return enforceBound({
+      tool: 'windows_update_readiness', timestamp: now(), scope, status: classifyError(error),
+      observations: [`Windows Update readiness unavailable: ${safeMessage((error as Error)?.message ?? error, 120)}`],
+      data: {},
+    });
+  }
+}
+
+/** Bounded sampling only. Never stops or changes a process. */
+async function runResourcePressure(
+  args: Record<string, unknown>,
+  runner: NonNullable<DiagnosticToolOptions['nativeRunner']>,
+  now: () => string,
+  timeoutMs: number,
+): Promise<DiagnosticResult> {
+  const durationSeconds = args.durationSeconds as number;
+  const sampleCount = args.sampleCount as number;
+  const scope = 'performance:resource-pressure';
+  try {
+    const raw = asRecord(await withTimeout(
+      runner('resourcePressure', { DurationSeconds: String(durationSeconds), SampleCount: String(sampleCount) }, timeoutMs),
+      timeoutMs,
+      'resource pressure probe',
+    ));
+    const status = nativeStatus(raw);
+    if (status === 'unavailable' || status === 'error') {
+      return enforceBound({
+        tool: 'windows_resource_pressure', timestamp: now(), scope, status,
+        observations: [safeMessage(raw.note ?? 'Resource pressure sampling unavailable with the current permissions.')],
+        data: {},
+      });
+    }
+    const cpuPercent = boundedNumber(raw.cpuPercent, 0, 100);
+    const memoryTotalBytes = boundedNumber(raw.memoryTotalBytes, 1, Number.MAX_SAFE_INTEGER);
+    const memoryAvailableBytes = boundedNumber(raw.memoryAvailableBytes, 0, memoryTotalBytes ?? Number.MAX_SAFE_INTEGER);
+    const samples = Array.isArray(raw.samples)
+      ? raw.samples.slice(0, sampleCount).map(value => boundedNumber(value, 0, 100)).filter((value): value is number => value !== undefined)
+      : [];
+    const topCpu = normalizeContributors(raw.topCpu, 'cpuSeconds');
+    const topMemory = normalizeContributors(raw.topMemory, 'workingSetBytes');
+
+    if (cpuPercent === undefined && memoryTotalBytes === undefined && !topCpu.length && !topMemory.length && !samples.length) {
+      return enforceBound({
+        tool: 'windows_resource_pressure', timestamp: now(), scope, status: 'unavailable',
+        observations: ['No CPU or memory sample could be established.'],
+        data: {},
+      });
+    }
+
+    const observations: string[] = [];
+    if (cpuPercent !== undefined) {
+      observations.push(`CPU utilization sampled over ${durationSeconds}s (${samples.length || 1} sample(s)): ${cpuPercent.toFixed(1)}%.`);
+    } else {
+      observations.push('CPU utilization could not be sampled.');
+    }
+    if (memoryTotalBytes !== undefined && memoryAvailableBytes !== undefined) {
+      const freeGiB = memoryAvailableBytes / 1024 ** 3;
+      const totalGiB = memoryTotalBytes / 1024 ** 3;
+      observations.push(`Available physical memory: ${freeGiB.toFixed(1)} GiB of ${totalGiB.toFixed(1)} GiB.`);
+    } else {
+      observations.push('Physical memory availability could not be sampled.');
+    }
+    if (topCpu.length) observations.push('Top CPU contributors (process name, sampled CPU seconds): ' + topCpu.map(row => `${row.name} (${row.value.toFixed(2)}s)`).join(', ') + '.');
+    if (topMemory.length) observations.push('Top memory contributors (process name, working set MiB): ' + topMemory.map(row => `${row.name} (${(row.value / 1024 ** 2).toFixed(1)} MiB)`).join(', ') + '.');
+    observations.push('Read-only sample: no process was stopped, restarted, or changed.', ...notesOf(raw));
+
+    const data: Record<string, JsonValue> = {
+      durationSeconds,
+      sampleCount,
+      samples,
+      topCpu: topCpu.map(row => ({ name: row.name, cpuSeconds: row.value })),
+      topMemory: topMemory.map(row => ({ name: row.name, workingSetBytes: row.value })),
+    };
+    if (cpuPercent !== undefined) data.cpuPercent = cpuPercent;
+    if (memoryTotalBytes !== undefined) data.memoryTotalBytes = memoryTotalBytes;
+    if (memoryAvailableBytes !== undefined) data.memoryAvailableBytes = memoryAvailableBytes;
+    return enforceBound({
+      tool: 'windows_resource_pressure', timestamp: now(), scope,
+      status: status === 'partial' || cpuPercent === undefined || memoryTotalBytes === undefined ? 'partial' : 'ok',
+      observations, data,
+    });
+  } catch (error) {
+    return enforceBound({
+      tool: 'windows_resource_pressure', timestamp: now(), scope, status: classifyError(error),
+      observations: [`Resource pressure sampling unavailable: ${safeMessage((error as Error)?.message ?? error, 120)}`],
+      data: {},
+    });
+  }
+}
+
+/** Volumes plus fixed allow-listed cache roots only. No caller path is accepted or returned. */
+async function runStorage(
+  args: Record<string, unknown>,
+  runner: NonNullable<DiagnosticToolOptions['nativeRunner']>,
+  now: () => string,
+  timeoutMs: number,
+): Promise<DiagnosticResult> {
+  const maxEntries = args.maxEntries as number;
+  const scope = 'storage:volumes+cache-roots';
+  try {
+    const raw = asRecord(await withTimeout(
+      runner('storage', { MaxEntries: String(maxEntries) }, timeoutMs),
+      timeoutMs,
+      'storage probe',
+    ));
+    const status = nativeStatus(raw);
+    if (status === 'unavailable' || status === 'error') {
+      return enforceBound({
+        tool: 'windows_storage', timestamp: now(), scope, status,
+        observations: [safeMessage(raw.note ?? 'Volume and cache storage data unavailable with the current permissions.')],
+        data: {},
+      });
+    }
+
+    const volumes: Record<string, JsonValue>[] = [];
+    if (Array.isArray(raw.volumes)) {
+      const seen = new Set<string>();
+      for (const item of raw.volumes.slice(0, MAX_VOLUMES)) {
+        const record = asRecord(item);
+        const drive = typeof record.drive === 'string' && /^[A-Za-z]:$/.test(record.drive) ? record.drive.toUpperCase() : undefined;
+        const totalBytes = boundedNumber(record.totalBytes, 0, Number.MAX_SAFE_INTEGER);
+        const freeBytes = boundedNumber(record.freeBytes, 0, totalBytes ?? Number.MAX_SAFE_INTEGER);
+        if (!drive || totalBytes === undefined || freeBytes === undefined || seen.has(drive)) continue;
+        seen.add(drive);
+        volumes.push({ drive, totalBytes, freeBytes, freePercent: totalBytes > 0 ? Math.round((freeBytes / totalBytes) * 1000) / 10 : 0 });
+      }
+    }
+
+    const cacheRoots: Record<string, JsonValue>[] = [];
+    if (Array.isArray(raw.cacheRoots)) {
+      const seen = new Set<string>();
+      for (const item of raw.cacheRoots.slice(0, MAX_STORAGE_ROOTS)) {
+        const record = asRecord(item);
+        const id = typeof record.id === 'string' && (STORAGE_CACHE_ROOT_IDS as readonly string[]).includes(record.id) ? record.id : undefined;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const present = toBoolean(record.present);
+        const sizeBytes = boundedNumber(record.sizeBytes, 0, Number.MAX_SAFE_INTEGER);
+        if (present === undefined && sizeBytes === undefined) continue;
+        cacheRoots.push({
+          id,
+          present: present ?? false,
+          sizeBytes: sizeBytes ?? 0,
+          fileCount: boundedInteger(record.fileCount, 0, 1_000_000) ?? 0,
+          skippedReparsePoints: boundedInteger(record.skippedReparsePoints, 0, 1_000_000) ?? 0,
+          truncated: toBoolean(record.truncated) ?? false,
+        });
+      }
+    }
+
+    if (!volumes.length && !cacheRoots.length) {
+      return enforceBound({
+        tool: 'windows_storage', timestamp: now(), scope, status: 'unavailable',
+        observations: ['No volume or allow-listed cache-root measurement could be established.'],
+        data: {},
+      });
+    }
+
+    const observations: string[] = [];
+    if (volumes.length) {
+      for (const volume of volumes.slice(0, MAX_VOLUMES)) {
+        observations.push(`${String(volume.drive)} has ${(Number(volume.freeBytes) / 1024 ** 3).toFixed(1)} GiB free of ${(Number(volume.totalBytes) / 1024 ** 3).toFixed(1)} GiB (${Number(volume.freePercent).toFixed(1)}% free).`);
+      }
+    } else {
+      observations.push('Volume availability could not be read.');
+    }
+    const presentRoots = cacheRoots.filter(root => root.present === true);
+    const totalCacheBytes = presentRoots.reduce((sum, root) => sum + Number(root.sizeBytes ?? 0), 0);
+    const skipped = cacheRoots.reduce((sum, root) => sum + Number(root.skippedReparsePoints ?? 0), 0);
+    observations.push(`Allow-listed cache roots found: ${presentRoots.length} of ${cacheRoots.length} checked; measured ${(totalCacheBytes / 1024 ** 2).toFixed(1)} MiB across at most ${maxEntries} entries per root.`);
+    if (skipped > 0) observations.push(`${skipped} reparse point(s) were skipped during the bounded cache traversal.`);
+    observations.push('Only fixed application cache roots were traversed; no arbitrary path was read or returned.', ...notesOf(raw));
+
+    const data: Record<string, JsonValue> = {
+      volumes,
+      cacheRoots,
+      measuredRootCount: presentRoots.length,
+      skippedReparsePoints: skipped,
+      maxEntries,
+    };
+    return enforceBound({
+      tool: 'windows_storage', timestamp: now(), scope,
+      status: status === 'partial' || !volumes.length ? 'partial' : 'ok',
+      observations, data,
+    });
+  } catch (error) {
+    return enforceBound({
+      tool: 'windows_storage', timestamp: now(), scope, status: classifyError(error),
+      observations: [`Storage data unavailable: ${safeMessage((error as Error)?.message ?? error, 120)}`],
+      data: {},
+    });
+  }
+}
+
+/** Read-only startup inventory. The raw command line is never returned. */
+async function runStartup(
+  args: Record<string, unknown>,
+  runner: NonNullable<DiagnosticToolOptions['nativeRunner']>,
+  now: () => string,
+  timeoutMs: number,
+): Promise<DiagnosticResult> {
+  const maxEntries = args.maxEntries as number;
+  const scope = 'startup:inventory';
+  try {
+    const raw = asRecord(await withTimeout(
+      runner('startup', { MaxEntries: String(maxEntries) }, timeoutMs),
+      timeoutMs,
+      'startup inventory probe',
+    ));
+    const status = nativeStatus(raw);
+    if (status === 'unavailable' || status === 'error' || !Array.isArray(raw.entries)) {
+      return enforceBound({
+        tool: 'windows_startup', timestamp: now(), scope,
+        status: status === 'error' ? 'error' : 'unavailable',
+        observations: [safeMessage(raw.note ?? 'Startup inventory unavailable with the current permissions.')],
+        data: {},
+      });
+    }
+
+    const entries: Record<string, JsonValue>[] = [];
+    for (const item of raw.entries.slice(0, maxEntries)) {
+      const record = asRecord(item);
+      const name = safeToken(record.name, /^[^\\/:*?"<>|\u0000-\u001f]{1,120}$/, 120);
+      const location = typeof record.location === 'string' && (STARTUP_LOCATIONS as readonly string[]).includes(record.location) ? record.location : undefined;
+      if (!name || !location) continue;
+      const publisher = safeToken(record.publisher, /^[^\\/:*?"<>|\u0000-\u001f]{1,120}$/, 120);
+      const protectedEntry = toBoolean(record.protected) === true || SECURITY_STARTUP_PATTERN.test(name);
+      entries.push({
+        name,
+        ...(publisher ? { publisher } : {}),
+        location,
+        enabled: toBoolean(record.enabled) ?? true,
+        protected: protectedEntry,
+      });
+    }
+
+    const protectedCount = entries.filter(entry => entry.protected === true).length;
+    const observations = [
+      entries.length
+        ? `Startup inventory lists ${entries.length} of at most ${maxEntries} fixed-location entries; ${protectedCount} are protected and are never changed.`
+        : `No startup entries were found in the fixed inventory locations (up to ${maxEntries} inspected).`,
+      ...entries.slice(0, 8).map(entry => `${String(entry.name)} — ${String(entry.location)}${entry.publisher ? ` — ${String(entry.publisher)}` : ''}${entry.protected ? ' — protected' : ''}.`),
+      'Inventory only: no startup entry was enabled, disabled, or changed.',
+      ...notesOf(raw),
+    ];
+    return enforceBound({
+      tool: 'windows_startup', timestamp: now(), scope,
+      status: status === 'partial' ? 'partial' : 'ok',
+      observations,
+      data: { entries, protectedCount, maxEntries },
+    });
+  } catch (error) {
+    return enforceBound({
+      tool: 'windows_startup', timestamp: now(), scope, status: classifyError(error),
+      observations: [`Startup inventory unavailable: ${safeMessage((error as Error)?.message ?? error, 120)}`],
+      data: {},
+    });
+  }
+}
+
+/** Running state plus known-profile ambiguity only. Content is never read or returned. */
+async function runAppHealth(
+  args: Record<string, unknown>,
+  runner: NonNullable<DiagnosticToolOptions['nativeRunner']>,
+  now: () => string,
+  timeoutMs: number,
+): Promise<DiagnosticResult> {
+  const app = args.app as AppFamily;
+  const scope = `app:${app}`;
+  const label = app === 'firefox' ? 'Firefox' : app === 'steam' ? 'Steam' : 'Obsidian';
+  try {
+    const raw = asRecord(await withTimeout(
+      runner('appHealth', { App: app }, timeoutMs),
+      timeoutMs,
+      'application health probe',
+    ));
+    const status = nativeStatus(raw);
+    if (status === 'unavailable' || status === 'error') {
+      return enforceBound({
+        tool: 'app_health', timestamp: now(), scope, status,
+        observations: [safeMessage(raw.note ?? `${label} state unavailable with the current permissions.`)],
+        data: { app },
+      });
+    }
+
+    const running = toBoolean(raw.running);
+    const processCount = boundedInteger(raw.processCount, 0, MAX_PROCESS_COUNT);
+    const profileCount = boundedInteger(raw.profileCount, 0, MAX_PROCESS_COUNT);
+    const ambiguous = toBoolean(raw.ambiguous);
+    const profileState = raw.profileState === 'single' || raw.profileState === 'multiple'
+      ? raw.profileState
+      : profileCount !== undefined
+        ? profileCount > 1 ? 'multiple' : 'single'
+        : ambiguous === true ? 'multiple' : 'unknown';
+
+    if (running === undefined && profileState === 'unknown') {
+      return enforceBound({
+        tool: 'app_health', timestamp: now(), scope, status: 'unavailable',
+        observations: [`No running state or known-profile observation could be established for ${label}.`],
+        data: { app },
+      });
+    }
+
+    const observations = [
+      running === undefined
+        ? `${label} running state could not be read.`
+        : running
+          ? `${label} is running (${processCount ?? 1} process(es) observed).`
+          : `${label} is not currently running.`,
+      profileState === 'multiple'
+        ? `Multiple known ${label} profiles were detected; PocketBench cannot determine which profile is active.`
+        : profileState === 'single'
+          ? `One known ${label} profile location was detected.`
+          : `Known ${label} profile ambiguity could not be established.`,
+      `No notes, cookies, profile file contents, or log contents were read.`,
+      ...notesOf(raw),
+    ];
+    const data: Record<string, JsonValue> = { app, profileState };
+    if (running !== undefined) data.running = running;
+    if (processCount !== undefined) data.processCount = processCount;
+    if (profileCount !== undefined) data.profileCount = profileCount;
+    return enforceBound({
+      tool: 'app_health', timestamp: now(), scope,
+      status: status === 'partial' || running === undefined || profileState === 'unknown' ? 'partial' : 'ok',
+      observations, data,
+    });
+  } catch (error) {
+    return enforceBound({
+      tool: 'app_health', timestamp: now(), scope, status: classifyError(error),
+      observations: [`${label} state unavailable: ${safeMessage((error as Error)?.message ?? error, 120)}`],
+      data: { app },
+    });
+  }
+}
+
 export function createDiagnosticTools(options: DiagnosticToolOptions = {}): {
   invoke: (name: string, args: unknown) => Promise<DiagnosticResult>;
 } {
@@ -619,19 +1304,40 @@ export function createDiagnosticTools(options: DiagnosticToolOptions = {}): {
         ? runNetwork(validated, runner, probe, clock, timeoutMs, probeTimeoutMs)
         : tool === 'windows_service'
           ? runService(validated, runner, clock, timeoutMs)
-          : runEvents(validated, runner, clock, timeoutMs),
+          : tool === 'windows_events'
+            ? runEvents(validated, runner, clock, timeoutMs)
+            : tool === 'windows_update_readiness'
+              ? runUpdateReadiness(validated, runner, clock, timeoutMs)
+              : tool === 'windows_resource_pressure'
+                ? runResourcePressure(validated, runner, clock, timeoutMs)
+                : tool === 'windows_storage'
+                  ? runStorage(validated, runner, clock, timeoutMs)
+                  : tool === 'windows_startup'
+                    ? runStartup(validated, runner, clock, timeoutMs)
+                    : runAppHealth(validated, runner, clock, timeoutMs),
       timeoutMs,
       `${tool} diagnostic`,
     );
     try {
       return await bounded;
     } catch (error) {
+      const record = validated as Record<string, unknown>;
       const scope =
         tool === 'windows_network'
-          ? `network:${String((validated as Record<string, unknown>).hostname)}`
+          ? `network:${String(record.hostname)}`
           : tool === 'windows_service'
-            ? `service:${String((validated as Record<string, unknown>).serviceName)}`
-            : `events:${String((validated as Record<string, unknown>).channel)}`;
+            ? `service:${String(record.serviceName)}`
+            : tool === 'windows_events'
+              ? `events:${String(record.channel)}`
+              : tool === 'windows_update_readiness'
+                ? 'updates:readiness'
+                : tool === 'windows_resource_pressure'
+                  ? 'performance:resource-pressure'
+                  : tool === 'windows_storage'
+                    ? 'storage:volumes+cache-roots'
+                    : tool === 'windows_startup'
+                      ? 'startup:inventory'
+                      : `app:${String(record.app)}`;
       return enforceBound({
         tool,
         timestamp: clock(),

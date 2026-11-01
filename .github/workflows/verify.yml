@@ -34,7 +34,7 @@ jobs:
           $installRoot = Join-Path $env:RUNNER_TEMP 'PocketBench-installed'
           $smokeData = Join-Path $env:RUNNER_TEMP 'PocketBench-smoke'
           $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
-          $installer = Join-Path $PWD "release/PocketBench Setup $version.exe"
+          $installer = Join-Path $PWD "release/PocketBench-Setup-$version.exe"
           $installed = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -Wait -PassThru
           if ($installed.ExitCode -ne 0) { throw 'Installer failed.' }
           $binary = Join-Path $installRoot 'PocketBench.exe'
@@ -46,11 +46,38 @@ jobs:
           New-Item -ItemType Directory -Path '.local' -Force | Out-Null
           $result | ConvertTo-Json | Set-Content -LiteralPath '.local/installed-smoke.json'
           Write-Output "Installed app scan passed: $($result.appCount) entries; renderer sandbox verified."
+      - name: Version-to-version upgrade in disposable runner (dummy credential only)
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+          # Fixed-repo public releases API, no auth, no token printed. Any
+          # redirect is refused (fixed host only); asset comes from the
+          # pinned API response, never a hand-built URL.
+          $resp = Invoke-WebRequest -Uri 'https://api.github.com/repos/duschino-source/pocketbench-windows/releases/latest' -TimeoutSec 60 -MaximumRedirection 0
+          if ($resp.StatusCode -ge 300) { throw 'Refusing redirect on public releases API.' }
+          $latest = $resp.Content | ConvertFrom-Json
+          if ($latest.tag_name -eq $tag -or $latest.draft -or $latest.prerelease) {
+            Write-Output 'No older stable release published yet; upgrade test skipped (fresh-install smoke above still ran).'
+            @{ ok = $true; skipped = 'no-older-stable-release' } | ConvertTo-Json | Set-Content -LiteralPath '.local/upgrade-result.json'
+          } else {
+            New-Item -ItemType Directory -Path 'release/upgrade-prev' -Force | Out-Null
+            # Hyphen asset name (explicit artifactName contract, matches
+            # old v0.1.1 public asset PocketBench-Setup-0.1.1.exe). Pinned
+            # fixed-repo public releases API, no auth.
+            $asset = $latest.assets | Where-Object { $_.name -eq ("PocketBench-Setup-" + $latest.tag_name.TrimStart('v') + '.exe') } | Select-Object -First 1
+            if (-not $asset) { throw 'Previous hyphen setup installer asset missing from latest stable release.' }
+            if ($asset.browser_download_url -notmatch '^https://github\.com/duschino-source/pocketbench-windows/releases/download/') { throw 'Refusing unexpected asset host.' }
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile 'release/upgrade-prev/prev-setup.exe' -TimeoutSec 600 -MaximumRedirection 5
+            pwsh -NoProfile -File tools/test-upgrade.ps1 -OldInstaller 'release/upgrade-prev/prev-setup.exe' -NewInstaller "release/PocketBench-Setup-$version.exe" -OutFile '.local/upgrade-result.json'
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: PocketBench-Windows-x64
           path: |
             release/*.exe
             release/*.blockmap
+            release/latest.yml
             .local/native-test-result.json
             .local/installed-smoke.json
+            .local/upgrade-result.json

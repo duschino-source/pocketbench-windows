@@ -300,6 +300,91 @@ code, .pb-mono { font-family: "Consolas", monospace; font-size: .875rem; overflo
 .pb-phase-tag { color: var(--pb-text-secondary); font-size: 12px; }
 .pb-app .fui-MessageBarBody { max-inline-size: 65ch; white-space: normal; }
 
+/* Startup */
+.pb-boot { min-height: 100dvh; display: grid; place-items: center; padding: 32px; background: #000000; color: var(--pb-text); }
+.pb-boot-card { width: min(480px, 100%); display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+.pb-boot-mark { width: 72px; height: 72px; display: grid; place-items: center; }
+.pb-boot-mark img { display: block; width: 64px; height: 64px; }
+.pb-boot-wordmark { display: flex; flex-direction: column; gap: 4px; }
+.pb-boot-name { font-size: 22px; font-weight: 600; letter-spacing: -.4px; }
+.pb-boot-sub { font-size: 12px; color: var(--pb-text-faint); }
+.pb-boot-loading, .pb-boot-error { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; padding: 24px; background: var(--pb-panel); border: 1px solid var(--pb-border); border-radius: var(--pb-radius); }
+.pb-boot-loading h1, .pb-boot-error h1 { font-size: 20px; line-height: 1.3; font-weight: 500; letter-spacing: -.2px; margin: 0; }
+.pb-boot-loading p, .pb-boot-error p { margin: 0; max-inline-size: 52ch; }
+.pb-boot-error { border-color: var(--pb-border-strong); }
+.pb-boot-error-title { display: flex; align-items: center; gap: 8px; color: var(--pb-text); }
+.pb-boot-error-title > svg { font-size: 22px; flex: 0 0 auto; }
+.pb-boot-help { font-size: 12px; color: var(--pb-text-faint); }
+
+/* Guided symptom categories */
+.pb-field-label { display: block; font-size: 12px; color: var(--pb-text-secondary); margin: 0 0 4px; }
+.pb-category-picker { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
+.pb-app .pb-category-picker .fui-Button { color: var(--pb-text-secondary); font-size: 12px; font-weight: 400; padding: 4px 8px; min-width: 0; }
+.pb-app .pb-category-picker [aria-pressed="true"] { background: var(--pb-accent-dim); color: var(--pb-text); }
+
+/* Operation progress */
+.pb-progress { align-items: flex-start; flex-wrap: wrap; }
+.pb-progress > svg { margin-top: 2px; flex: 0 0 auto; }
+.pb-progress-copy { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.pb-progress-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pb-progress-time { font-size: 12px; color: var(--pb-text-faint); font-variant-numeric: tabular-nums; }
+.pb-progress-message { overflow-wrap: anywhere; }
+.pb-progress-note { font-size: 12px; color: var(--pb-text-faint); margin: 0; }
+.pb-progress-meter { display: flex; align-items: center; gap: 8px; flex: 1 1 180px; min-width: 140px; max-width: 320px; }
+.pb-progress-meter .fui-ProgressBar { flex: 1; }
+.pb-progress-percent { font-size: 12px; color: var(--pb-text-secondary); min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Repair summary */
+.pb-plan-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding: 0 0 24px; margin: 0 0 24px; border-bottom: 1px solid var(--pb-border); }
+.pb-plan-summary-block { min-width: 0; }
+.pb-plan-summary-block h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500; color: var(--pb-text-secondary); margin: 0 0 8px; }
+.pb-plan-summary-block p { font-size: 14px; line-height: 1.55; color: var(--pb-text); margin: 0; overflow-wrap: anywhere; }
+.pb-plan-summary-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; color: var(--pb-text); }
+.pb-plan-summary-list li { position: relative; padding-left: 12px; overflow-wrap: anywhere; }
+.pb-plan-summary-list li::before { content: ""; position: absolute; left: 0; top: .6em; width: 3px; height: 3px; border-radius: 50%; background: #888888; }
+.pb-plan-status-note { border: 1px solid var(--pb-border-strong); background: #0c0c0c; border-radius: 4px; padding: 12px 16px; margin: 0 24px 20px; font-size: 14px; line-height: 1.55; max-inline-size: 65ch; }
+.pb-effects { margin: 0 0 8px; }
+.pb-effect-row { padding: 16px 0; border-bottom: 1px solid var(--pb-border); }
+.pb-effect-row:last-child { border-bottom: 0; }
+.pb-plan-warning { border-left: 2px solid #b3b3b3; background: #121212; border-radius: 4px; padding: 12px 16px; margin: 12px 0 24px; font-size: 14px; line-height: 1.55; max-inline-size: 65ch; }
+
+/* Settings: updates and advanced */
+.pb-update-status { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: start; }
+.pb-update-copy { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.pb-update-copy p { margin: 0; }
+.pb-update-version { font-size: 12px; color: var(--pb-text-faint); font-variant-numeric: tabular-nums; }
+.pb-update-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.pb-update-progress { max-width: 420px; margin: 20px 0 0; }
+.pb-update-error { border-left: 2px solid #888888; padding-left: 12px; color: var(--pb-text); }
+.pb-advanced-disclosure summary { display: flex; align-items: baseline; gap: 12px; cursor: pointer; padding: 4px 0; }
+.pb-advanced-title { font-size: 18px; line-height: 1.4; font-weight: 600; letter-spacing: -.2px; color: var(--pb-text); }
+.pb-advanced-hint { margin-left: auto; font-size: 12px; color: var(--pb-text-faint); font-weight: 400; }
+.pb-advanced-body { padding-top: 20px; }
+.pb-subsection-title { font-size: 16px; line-height: 1.4; font-weight: 500; margin: 24px 0 12px; }
+.pb-advanced-body > .pb-subsection-title:first-child { margin-top: 0; }
+.pb-advanced-body .pb-grid { margin-bottom: 8px; }
+
+.pb-app .pb-boot p,
+.pb-app .pb-plan-summary-block p,
+.pb-app .pb-plan-summary-list,
+.pb-app .pb-plan-status-note,
+.pb-app .pb-plan-warning,
+.pb-app .pb-progress-message,
+.pb-app .pb-progress-note,
+.pb-app .pb-update-copy p,
+.pb-app .pb-advanced-body p { max-inline-size: 65ch; }
+
+@media (max-width: 1000px) {
+  .pb-plan-summary { grid-template-columns: minmax(0, 1fr); }
+  .pb-update-status { grid-template-columns: minmax(0, 1fr); }
+  .pb-update-actions { justify-content: flex-start; }
+}
+@media (max-width: 760px) {
+  .pb-progress-meter { flex-basis: 100%; max-width: none; }
+  .pb-advanced-hint { display: none; }
+  .pb-plan-status-note { margin-left: 0; margin-right: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pb-app *, .pb-app *::before, .pb-app *::after { animation: none !important; transition: none !important; }
   .pb-app .fui-Button:hover, .pb-app .fui-Button:active, .pb-app-entry:hover, .pb-app-entry:active { transform: none !important; }

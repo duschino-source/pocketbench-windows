@@ -1,11 +1,20 @@
 import * as React from 'react';
 import { Badge, Button, ProgressBar } from '@fluentui/react-components';
 import { ArrowRightRegular, CheckmarkCircleRegular, DesktopRegular, HistoryRegular, SearchRegular, WarningRegular } from '@fluentui/react-icons';
-import type { ViewProps } from '../types';
+import type { DiagnosticEvidence, SymptomCategory } from '../../shared/contracts';
 import { formatBytes, formatDateTime, formatUptime, runStatusLabel } from '../format';
 import { SymptomForm } from '../components/SymptomForm';
 import { PlanDetail } from '../components/PlanDetail';
-import { findPlan, latestRunForPlan } from '../types';
+import { findPlan, latestRunForPlan, type ViewProps } from '../types';
+
+function symptomCategoryOf(item: DiagnosticEvidence): SymptomCategory | undefined {
+  const value = item.category.toLowerCase();
+  if (/network|dns|proxy|connect/.test(value)) return 'connectivity';
+  if (/update/.test(value)) return 'updates';
+  if (/memory|cpu|perform|startup/.test(value)) return 'performance';
+  if (item.area === 'app') return 'app';
+  return undefined;
+}
 
 export function OverviewView(props: ViewProps): React.ReactElement {
   const { state, busy } = props;
@@ -37,7 +46,7 @@ export function OverviewView(props: ViewProps): React.ReactElement {
             <div className="pb-section-head"><h2 className="pb-section-title" id="overview-issues">Latest findings</h2><Button appearance="subtle" size="small" icon={<ArrowRightRegular />} iconPosition="after" onClick={() => props.onNavigate('windows')}>View all</Button></div>
             {!snapshot ? <div className="pb-quiet-empty"><SearchRegular /><div><h3>A clear picture starts with a scan</h3><p>Check Windows, services, startup, and installed applications.</p><Button appearance="secondary" disabled={busy.scan} onClick={() => void props.onScan()}>{busy.scan ? 'Scanning…' : 'Scan this PC'}</Button></div></div>
               : !findings.length ? <div className="pb-quiet-empty"><CheckmarkCircleRegular /><div><h3>No findings in this scan</h3><p>You can still describe a problem above.</p></div></div>
-                : <ul className="pb-list">{findings.slice(0, 3).map(item => <li className="pb-row" key={item.id}><div className={'pb-finding-icon pb-severity-' + item.severity}>{item.severity === 'info' ? <DesktopRegular /> : <WarningRegular />}</div><div className="pb-row-main"><div className="pb-row-title">{item.title}</div><div className="pb-row-sub">{item.observed}</div></div><Button appearance="subtle" size="small" disabled={busy.investigating} onClick={() => void props.onInvestigate({symptom:item.title,evidenceId:item.id})}>Investigate <ArrowRightRegular /></Button></li>)}</ul>}
+                : <ul className="pb-list">{findings.slice(0, 3).map(item => <li className="pb-row" key={item.id}><div className={'pb-finding-icon pb-severity-' + item.severity}>{item.severity === 'info' ? <DesktopRegular /> : <WarningRegular />}</div><div className="pb-row-main"><div className="pb-row-title">{item.title}</div><div className="pb-row-sub">{item.observed}</div></div><Button appearance="subtle" size="small" disabled={busy.investigating} onClick={() => { const guided = symptomCategoryOf(item); void props.onInvestigate({symptom:item.title,evidenceId:item.id,...(guided?{category:guided}:{})}); }}>Investigate <ArrowRightRegular /></Button></li>)}</ul>}
           </section>
         </div>
         <aside className="pb-overview-secondary">

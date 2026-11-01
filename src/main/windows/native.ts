@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join, resolve, sep } from 'node:path'
 
@@ -43,18 +43,20 @@ export interface ProcessResult {
   stderr: string
 }
 
-export type ProcessRunner = (exe: string, args: string[], timeoutMs: number) => Promise<ProcessResult>
+export interface ProcessOptions { signal?: AbortSignal; onOutput?: (text:string)=>void }
+export type ProcessRunner = (exe: string, args: string[], timeoutMs: number, options?: ProcessOptions) => Promise<ProcessResult>
 
 const ARG_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,31}$/
 const MAX_ARG_VALUE_LENGTH = 8192
 
-function defaultRunner(exe: string, args: string[], timeoutMs: number): Promise<ProcessResult> {
+function defaultRunner(exe: string, args: string[], timeoutMs: number, options?: ProcessOptions): Promise<ProcessResult> {
   return new Promise((finished) => {
-    const child = spawn(exe, args, { windowsHide: true, shell: false, timeout: timeoutMs })
+    const child = spawn(exe, args, { windowsHide: true, shell: false, timeout: timeoutMs, signal: options?.signal })
     let stdout = ''
     let stderr = ''
     child.stdout?.on('data', (chunk) => {
       stdout += String(chunk)
+      options?.onOutput?.(String(chunk))
     })
     child.stderr?.on('data', (chunk) => {
       stderr += String(chunk)
@@ -134,13 +136,14 @@ export async function runScript<T = unknown>(
   name: ScriptName,
   args: Record<string, string> = {},
   timeoutMs = 60000,
+  options?: ProcessOptions,
 ): Promise<T> {
   if (!(SCRIPT_NAMES as readonly string[]).includes(name)) {
     throw new Error(`Refusing to run unknown script: ${name}`)
   }
   assertValidArgs(args)
   const scriptPath = resolveScriptPath(name)
-  const result = await runner(powershellExe(), toArgv(scriptPath, args), timeoutMs)
+  const result = await runner(powershellExe(), toArgv(scriptPath, args), timeoutMs, options)
   if (result.exitCode !== 0) {
     const detail = stripBom(result.stderr || result.stdout).trim().slice(0, 2000)
     throw new Error(`Script ${name} failed (exit ${result.exitCode}): ${detail}`)
@@ -180,6 +183,7 @@ export async function userOperation<T = unknown>(
   operation: string,
   args: Record<string, string> = {},
   timeoutMs = 60000,
+  options?: ProcessOptions,
 ): Promise<T> {
   if (!(USER_OPERATIONS as readonly string[]).includes(operation)) {
     throw new Error(`Unsupported user operation: ${operation}`)
@@ -207,7 +211,7 @@ export async function userOperation<T = unknown>(
       throw new Error('Invalid StateBase64 value.')
     }
   }
-  return runScript<T>('user.ps1', { Operation: op, ...args }, timeoutMs)
+  return runScript<T>('user.ps1', { Operation: op, ...args }, timeoutMs, options)
 }
 
 function ensureReceiptPath(dataDirectory: string): string {
@@ -247,6 +251,7 @@ export async function elevatedOperation(
   operation: string,
   dataDirectory: string,
   serviceName?: string,
+  onProgress?: (message:string,percent?:number)=>void,
 ): Promise<ElevatedResult> {
   if (!(ELEVATED_OPERATIONS as readonly string[]).includes(operation)) {
     throw new Error(`Unsupported elevated operation: ${operation}`)
@@ -278,7 +283,34 @@ export async function elevatedOperation(
   ]
   if (serviceName) argv.push('-ServiceName', serviceName)
   const timeoutMs = op === 'integrityRepair' ? 30 * 60 * 1000 : 120 * 1000
-  const launched = await runner(powershellExe(), argv, timeoutMs)
+  let lastProgress=''
+  const progressTimer=onProgress?setInterval(()=>{
+    try {
+      const file=receipt+'.progress'
+      const stat=lstatSync(file)
+      if(!stat.isFile() || stat.isSymbolicLink() || stat.size>4096)return
+      const raw=readFileSync(file,'utf8').replace(/^\uFEFF/,'')
+      if(raw===lastProgress)return
+      const record=JSON.parse(raw)
+      const stages=['Repairing Windows component store','Repairing Windows system files','Verifying Windows repairs']
+      if(!stages.includes(record.stage))return
+      lastProgress=raw
+      onProgress(record.stage,Number.isInteger(record.percent)&&record.percent>=0&&record.percent<=100?record.percent:undefined)
+    } catch { /* Partial writes are retried; progress never establishes success. */ }
+  },500):undefined
+  let launched:ProcessResult
+  try {launched=await runner(powershellExe(), argv, timeoutMs)} finally {
+    if(progressTimer)clearInterval(progressTimer)
+    // Best-effort advisory sidecar cleanup. CreateNew opening already guarantees
+    // the receipt itself is never overwritten; the progress file is advisory-only
+    // and is never used to establish success. Cancellation never stops DISM/SFC:
+    // there is intentionally no child-process kill here.
+    try {
+      const sidecar=receipt+'.progress'
+      const stat=lstatSync(sidecar)
+      if(stat.isFile() && !stat.isSymbolicLink())unlinkSync(sidecar)
+    } catch { /* Missing/unreadable sidecar is not a repair outcome. */ }
+  }
   if (!existsSync(receipt)) {
     return {
       success: false,

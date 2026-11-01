@@ -4,6 +4,7 @@ import type {
   ProgressEvent,
   RepairPlan,
   RepairRun,
+  UpdateState,
 } from '../shared/contracts';
 
 export type NavKey = 'overview' | 'windows' | 'apps' | 'activity' | 'settings';
@@ -15,6 +16,7 @@ export interface BusyState {
   undoingRunId: string | null;
   savingKey: boolean;
   clearingKey: boolean;
+  cancelling: boolean;
 }
 
 export const idleBusy: BusyState = {
@@ -24,7 +26,20 @@ export const idleBusy: BusyState = {
   undoingRunId: null,
   savingKey: false,
   clearingKey: false,
+  cancelling: false,
 };
+
+export interface UpdateViewProps {
+  state: UpdateState | null;
+  error: string | null;
+  action: 'refresh' | 'check' | 'install' | null;
+  canCheck: boolean;
+  canInstall: boolean;
+  canRefresh: boolean;
+  refresh: () => Promise<void>;
+  check: () => Promise<void>;
+  install: () => Promise<void>;
+}
 
 export function isBusy(busy: BusyState): boolean {
   return (
@@ -33,7 +48,8 @@ export function isBusy(busy: BusyState): boolean {
     busy.applyingPlanId !== null ||
     busy.undoingRunId !== null ||
     busy.savingKey ||
-    busy.clearingKey
+    busy.clearingKey ||
+    busy.cancelling
   );
 }
 
@@ -42,6 +58,7 @@ export interface ViewProps {
   busy: BusyState;
   progress: ProgressEvent | null;
   selectedPlanId: string | null;
+  updates: UpdateViewProps;
   onNavigate: (nav: NavKey) => void;
   onScan: () => Promise<void>;
   onSelectPlan: (id: string | null) => void;

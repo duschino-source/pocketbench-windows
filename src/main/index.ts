@@ -6,6 +6,8 @@ import { isIP } from 'node:net'
 import { WindowsEngine } from './windows'
 import { MeteredModel, redact } from './model'
 import { Controller } from './controller'
+import { autoUpdater } from 'electron-updater'
+import { UpdateManager, type UpdateAdapter } from './updater'
 import { AppIcons } from './app-icons'
 import { runScript } from './windows/native'
 import type { AppSettings, InvestigateRequest } from '../shared/contracts'
@@ -14,6 +16,7 @@ const here=dirname(fileURLToPath(import.meta.url))
 app.setName('PocketBench')
 let window:BrowserWindow | null=null
 let model:MeteredModel
+let updates:UpdateManager|undefined
 const dataArgument=process.argv.find(arg=>arg.startsWith('--data-dir='))
 const userDataDirectory=dataArgument?dataArgument.slice('--data-dir='.length):join(app.getPath('appData'),'PocketBenchDesktop')
 mkdirSync(userDataDirectory,{recursive:true});app.setPath('userData',userDataDirectory)
@@ -57,6 +60,10 @@ app.whenReady().then(async()=>{
     if (!window || event.sender!==window.webContents || event.senderFrame!==window.webContents.mainFrame) throw new Error('Untrusted application frame')
     try {return await callback(...args)} catch(error) {throw new Error(redact((error as Error).message))}
   })
+  // This release is unsigned. Enable only after release signing is provisioned and tested.
+  updates=new UpdateManager({currentVersion:app.getVersion(),installed:app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR,trustedPublisher:false,adapter:autoUpdater as unknown as UpdateAdapter,isBusy:()=>controller.isBusy(),changed:state=>window?.webContents.send('pocketbench:update',state)})
+  handle('cancel',()=>controller.cancelOperation())
+  handle('update-state',()=>updates!.getState());handle('update-check',()=>updates!.check());handle('update-install',()=>updates!.install())
   handle('state',()=>controller.state());handle('scan',()=>controller.scan())
   handle('app-icon',async(id:unknown)=>(await icons.get(id)) || await defaultProgramIcon)
   handle('investigate',(request:InvestigateRequest)=>controller.investigate(request))
@@ -78,8 +85,10 @@ app.whenReady().then(async()=>{
   window.webContents.on('will-navigate',(event,url)=>{if(url!==startUrl)event.preventDefault()})
   window.webContents.on('will-attach-webview',event=>event.preventDefault())
   window.once('ready-to-show',()=>window?.show())
+  window.on('close',event=>{if(controller.isBusy()){event.preventDefault();window?.webContents.send('pocketbench:progress',{phase:'apply',message:'Finish the current operation before closing PocketBench.',cancellable:false})}})
   window.on('closed',()=>{window=null})
   if(devUrl)await window.loadURL(devUrl);else await window.loadFile(join(here,'../renderer/index.html'))
+  if(app.isPackaged && !process.argv.includes('--smoke'))updates.start()
   if(process.argv.includes('--smoke')) {
     try {
       const snapshot=await controller.scan()
@@ -90,4 +99,4 @@ app.whenReady().then(async()=>{
   }
 }).catch(error=>{console.error('PocketBench startup:',redact(error.message));app.exit(1)})
 app.on('window-all-closed',()=>app.quit())
-app.on('before-quit',()=>{void model?.reset()})
+app.on('before-quit',()=>{updates?.dispose();void model?.reset()})

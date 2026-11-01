@@ -4,6 +4,7 @@ export interface DiagnosticEvidence {
   id: string; area: 'windows' | 'app'; category: string; title: string
   severity: 'info' | 'warning' | 'critical'; observed: string; details: string[]
   appId?: string; suggestedOperation?: OperationId; context?: Record<string, JsonValue>
+  observedAt?: string; expiresAt?: string
 }
 export interface AppTarget {
   id: string; name: string; version: string; publisher: string; installLocation?: string
@@ -11,7 +12,7 @@ export interface AppTarget {
   capabilities: OperationId[]
 }
 export interface StartupEntry { id: string; name: string; command: string; location: string; enabled: boolean }
-export interface ServiceInfo { name: string; displayName: string; status: string; startType: string }
+export interface ServiceInfo { name: string; displayName: string; status: string; startType: string; triggerStart?: boolean }
 export interface SystemSnapshot {
   scannedAt: string; platform: string; machine: { name: string; os: string; memoryTotal: number; memoryFree: number; uptime: number; cpuCount: number }
   metrics: { diskFree: number; diskTotal: number; cpuPercent: number | null }
@@ -48,11 +49,16 @@ export interface RepairRun {
   status: 'running' | 'fixed' | 'failed' | 'pending-verification' | 'undone'
   executions: StepExecution[]; verification: VerificationResult[]; error?: string; canUndo: boolean
 }
-export interface InvestigateRequest { symptom: string; appId?: string; evidenceId?: string }
+export type SymptomCategory = 'performance' | 'connectivity' | 'updates' | 'app'
+export interface InvestigateRequest { symptom: string; appId?: string; evidenceId?: string; category?: SymptomCategory }
 export interface BudgetState { limit: number; spent: number; reserved: number; remaining: number; requests: number }
 export interface AppSettings { hasApiKey: boolean; budgetLimit: number; model: string; labMode: boolean; dataDirectory: string }
 export interface AppState { snapshot: SystemSnapshot | null; plans: RepairPlan[]; history: RepairRun[]; settings: AppSettings; budget: BudgetState }
-export interface ProgressEvent { phase: 'scan' | 'research' | 'review' | 'apply' | 'verify' | 'undo'; message: string; planId?: string }
+export interface ProgressEvent { phase: 'scan' | 'research' | 'review' | 'apply' | 'verify' | 'undo'; message: string; planId?: string; startedAt?: string; percent?: number; cancellable?: boolean; cancellationReason?: string; snapshot?: SystemSnapshot }
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error' | 'manual'
+  supported: boolean; trustedPublisher: boolean; version?: string; percent?: number; message?: string; releaseUrl?: string
+}
 export interface PocketBenchAPI {
   getState(): Promise<AppState>; scan(): Promise<SystemSnapshot>
   getAppIcon(appId: string): Promise<string | null>
@@ -60,5 +66,8 @@ export interface PocketBenchAPI {
   undo(runId: string): Promise<RepairRun>; saveApiKey(key: string): Promise<AppSettings>
   clearApiKey(): Promise<AppSettings>; openExternal(url: string): Promise<void>
   onProgress(callback: (event: ProgressEvent) => void): () => void
+  cancelOperation(): Promise<void>
+  getUpdateState(): Promise<UpdateState>; checkForUpdates(): Promise<UpdateState>; installUpdate(): Promise<void>
+  onUpdate(callback: (state: UpdateState) => void): () => void
 }
 declare global { interface Window { pocketbench: PocketBenchAPI } }

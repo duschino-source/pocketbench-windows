@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { PocketBenchAPI, ProgressEvent } from '../shared/contracts'
+import type { PocketBenchAPI, ProgressEvent, UpdateState } from '../shared/contracts'
 const api: PocketBenchAPI = {
+  cancelOperation: () => ipcRenderer.invoke('pocketbench:cancel'),
+  getUpdateState: () => ipcRenderer.invoke('pocketbench:update-state'),
+  checkForUpdates: () => ipcRenderer.invoke('pocketbench:update-check'),
+  installUpdate: () => ipcRenderer.invoke('pocketbench:update-install'),
+  onUpdate: callback => {const listener=(_event:unknown,state:UpdateState)=>callback(state);ipcRenderer.on('pocketbench:update',listener);return ()=>ipcRenderer.removeListener('pocketbench:update',listener)},
   getState: () => ipcRenderer.invoke('pocketbench:state'),
   scan: () => ipcRenderer.invoke('pocketbench:scan'),
   getAppIcon: appId => ipcRenderer.invoke('pocketbench:app-icon',appId),

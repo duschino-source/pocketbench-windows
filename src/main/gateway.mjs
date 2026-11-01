@@ -26,11 +26,12 @@ export class BudgetLedger {
     if (!Number.isFinite(amount) || amount < 0 || amount > this.snapshot().remaining) throw new Error('Budget exhausted: request refused before contacting Meta.')
     const id = randomUUID(); this.record({ type:'reserve', id, amount, label, at: new Date().toISOString() }); return id
   }
-  settle(id, amount) {
+  settle(id, amount, usage) {
     const reservation = this.entries.find(e => e.type === 'reserve' && e.id === id)
     if (!reservation || this.entries.some(e => e.type === 'settle' && e.id === id)) throw new Error('Invalid budget settlement')
     if (!Number.isFinite(amount) || amount < 0 || amount > reservation.amount) throw new Error('Unexpected billing: reservation retained; gateway must be reconciled.')
-    this.record({ type:'settle', id, amount, at: new Date().toISOString() })
+    const measured = usage && Number.isSafeInteger(usage.inputTokens) && usage.inputTokens >= 0 && Number.isSafeInteger(usage.outputTokens) && usage.outputTokens >= 0 ? {usage} : {}
+    this.record({ type:'settle', id, amount, ...measured, at: new Date().toISOString() })
   }
 }
 
@@ -95,7 +96,10 @@ export function createGateway({key, token, ledger, upstream = 'https://api.meta.
         // If provider omits search accounting, keep the conservative search reservation charged.
         if (searches && !searchQueries) searchQueries = 128
       }
-      if (usage) ledger.settle(reservation, cost(usage.prompt_tokens ?? usage.input_tokens ?? 0, usage.completion_tokens ?? usage.output_tokens ?? 0, searchQueries))
+      if (usage) {
+        const inputTokens=usage.prompt_tokens ?? usage.input_tokens ?? 0, outputTokens=usage.completion_tokens ?? usage.output_tokens ?? 0
+        ledger.settle(reservation, cost(inputTokens,outputTokens,searchQueries), {inputTokens,outputTokens,searchQueries})
+      }
       res.end()
     } catch (error) { send(reservation ? 502 : 400, {error:{message:String(error.message).split(key).join('[REDACTED]')}}) }
   })

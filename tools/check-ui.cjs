@@ -10,6 +10,7 @@ process.chdir(root);fs.mkdirSync('.local',{recursive:true});
 app.setPath('userData',path.join(process.cwd(),'.local','ui-qa-profile'));
 const state={snapshot:{scannedAt:new Date().toISOString(),platform:'win32',machine:{name:'QA fixture',os:'Windows 11',memoryTotal:16*1024**3,memoryFree:8*1024**3,uptime:3600,cpuCount:8},metrics:{diskFree:100*1024**3,diskTotal:500*1024**3,cpuPercent:12},diagnostics:[],apps:[{id:'qa-firefox',name:'Mozilla Firefox',version:'159.0',publisher:'Mozilla',family:'firefox',capabilities:['app.patchConfig','app.restart']},{id:'qa-obsidian',name:'Obsidian',version:'1.0',publisher:'Obsidian',family:'obsidian',capabilities:[]}],startup:[],services:[],labMode:true},plans:[],history:[],settings:{hasApiKey:false,budgetLimit:90,model:'muse-spark-1.3',labMode:true,dataDirectory:'Isolated UI QA fixture'},budget:{limit:90,spent:0,reserved:0,remaining:90,requests:0}};
 ipcMain.handle('pocketbench:state',()=>state);
+ipcMain.handle('pocketbench:update-state',()=>({status:'manual',supported:false,trustedPublisher:false,message:'Isolated UI check'}));
 const fixtureIcon='data:image/png;base64,'+fs.readFileSync('resources/icon.png').toString('base64');
 ipcMain.handle('pocketbench:app-icon',()=>fixtureIcon);
 for(const name of ['scan','investigate','apply','undo','save-key','clear-key','open-external'])ipcMain.handle('pocketbench:'+name,()=>{throw Error('Isolated UI QA: host operations unavailable')});

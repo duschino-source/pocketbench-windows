@@ -12,7 +12,6 @@ import {
   BeakerRegular,
   DesktopPulseRegular,
   DismissRegular,
-  ErrorCircleRegular,
   HistoryRegular,
   HomeRegular,
   SettingsRegular,
@@ -22,10 +21,13 @@ import type {
   AppState,
   InvestigateRequest,
   ProgressEvent,
+  UpdateState,
 } from '../shared/contracts';
-import { getApi, toMessage } from './api';
+import { getApi, readApiAvailability, readUpdateState, toMessage } from './api';
 import { formatDateTime } from './format';
 import { idleBusy, isBusy, type NavKey } from './types';
+import { StartupScreen } from './components/StartupScreen';
+import { OperationProgress } from './components/OperationProgress';
 import { OverviewView } from './views/OverviewView';
 import { WindowsView } from './views/WindowsView';
 import { AppsView } from './views/AppsView';
@@ -66,6 +68,26 @@ export default function App(): React.ReactElement {
   const [busy, setBusy] = React.useState(idleBusy);
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null);
   const [selectedPlanId, setSelectedPlanId] = React.useState<string | null>(null);
+  const [updateState, setUpdateState] = React.useState<UpdateState | null>(null);
+  const [updateError, setUpdateError] = React.useState<string | null>(null);
+  const [updateAction, setUpdateAction] = React.useState<'refresh' | 'check' | 'install' | null>(null);
+  const [cancelPending, setCancelPending] = React.useState(false);
+
+  const capabilities = React.useMemo(() => readApiAvailability(), []);
+  const cancelRequested = React.useRef(false);
+  const lastPhase = React.useRef<ProgressEvent['phase'] | null>(null);
+  const loadId = React.useRef(0);
+
+  const loadState = React.useCallback(async () => {
+    const requestId = ++loadId.current;
+    setLoadError(null);
+    try {
+      const next = await getApi().getState();
+      if (requestId === loadId.current) setState(next);
+    } catch (error: unknown) {
+      if (requestId === loadId.current) setLoadError(toMessage(error));
+    }
+  }, []);
 
   const refreshState = React.useCallback(async () => {
     const next = await getApi().getState();
@@ -74,19 +96,8 @@ export default function App(): React.ReactElement {
   }, []);
 
   React.useEffect(() => {
-    let cancelled = false;
-    getApi()
-      .getState()
-      .then((next) => {
-        if (!cancelled) setState(next);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setLoadError(toMessage(error));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void loadState();
+  }, [loadState]);
 
   React.useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -103,21 +114,68 @@ export default function App(): React.ReactElement {
   }, []);
 
   React.useEffect(() => {
+    if (!capabilities.onUpdate) return;
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = getApi().onUpdate((next) => {
+        const parsed = readUpdateState(next);
+        if (parsed) setUpdateState(parsed);
+      });
+    } catch (error: unknown) {
+      setUpdateError(toMessage(error));
+    }
+    return () => {
+      unsubscribe?.();
+    };
+  }, [capabilities.onUpdate]);
+
+  React.useEffect(() => {
     if (!state || !selectedPlanId) return;
     if (!state.plans.some((plan) => plan.id === selectedPlanId)) {
       setSelectedPlanId(null);
     }
   }, [state, selectedPlanId]);
 
-  const fail = (error: unknown) => {
+  /**
+   * Each new stage refreshes the snapshot so progress is described against the
+   * current machine state. A stage-provided snapshot is used directly.
+   */
+  React.useEffect(() => {
+    if (!progress) {
+      lastPhase.current = null;
+      cancelRequested.current = false;
+      setCancelPending(false);
+      return;
+    }
+    if (lastPhase.current === progress.phase) return;
+    lastPhase.current = progress.phase;
+    const snapshot = progress.snapshot;
+    if (snapshot) {
+      setState((previous) => (previous ? { ...previous, snapshot } : previous));
+      return;
+    }
+    void getApi()
+      .getState()
+      .then((next) => setState(next))
+      .catch(() => {
+        // The running operation remains authoritative if a refresh races it.
+      });
+  }, [progress]);
+
+  const fail = React.useCallback((error: unknown) => {
     setActionError(toMessage(error));
-  };
+  }, []);
 
   const handleScan = React.useCallback(async () => {
     setActionError(null);
     setNotice(null);
     setBusy((prev) => ({ ...prev, scan: true }));
-    setProgress({ phase: 'scan', message: 'Scanning Windows and installed apps…' });
+    setProgress({
+      phase: 'scan',
+      message: 'Scanning Windows and installed apps…',
+      startedAt: new Date().toISOString(),
+      cancellable: false,
+    });
     try {
       const snapshot = await getApi().scan();
       await refreshState();
@@ -125,12 +183,35 @@ export default function App(): React.ReactElement {
         `Scan finished at ${formatDateTime(snapshot.scannedAt)}: ${snapshot.diagnostics.length} diagnostics, ${snapshot.apps.length} apps.`,
       );
     } catch (error: unknown) {
-      fail(error);
+      if (cancelRequested.current) {
+        setNotice('Scan stopped at your request. No settings were changed.');
+      } else {
+        fail(error);
+      }
     } finally {
+      cancelRequested.current = false;
       setBusy((prev) => ({ ...prev, scan: false }));
       setProgress(null);
     }
-  }, [refreshState]);
+  }, [fail, refreshState]);
+
+  const handleCancel = React.useCallback(async () => {
+    if (!progress?.cancellable || !capabilities.cancelOperation) return;
+    setActionError(null);
+    cancelRequested.current = true;
+    setBusy((prev) => ({ ...prev, cancelling: true }));
+    try {
+      await getApi().cancelOperation();
+      setCancelPending(true);
+      setNotice('Cancellation requested. The operation will stop after the current step.');
+    } catch (error: unknown) {
+      cancelRequested.current = false;
+      setCancelPending(false);
+      fail(error);
+    } finally {
+      setBusy((prev) => ({ ...prev, cancelling: false }));
+    }
+  }, [capabilities.cancelOperation, fail, progress?.cancellable]);
 
   const handleInvestigate = React.useCallback(
     async (request: InvestigateRequest) => {
@@ -149,7 +230,7 @@ export default function App(): React.ReactElement {
         setProgress(null);
       }
     },
-    [refreshState],
+    [fail, refreshState],
   );
 
   const handleApply = React.useCallback(
@@ -171,7 +252,7 @@ export default function App(): React.ReactElement {
         setProgress(null);
       }
     },
-    [refreshState],
+    [fail, refreshState],
   );
 
   const handleUndo = React.useCallback(
@@ -190,7 +271,7 @@ export default function App(): React.ReactElement {
         setProgress(null);
       }
     },
-    [refreshState],
+    [fail, refreshState],
   );
 
   const handleOpenExternal = React.useCallback(async (url: string) => {
@@ -204,7 +285,7 @@ export default function App(): React.ReactElement {
     } catch (error: unknown) {
       fail(error);
     }
-  }, []);
+  }, [fail]);
 
   const handleSaveKey = React.useCallback(
     async (key: string) => {
@@ -221,7 +302,7 @@ export default function App(): React.ReactElement {
         setBusy((prev) => ({ ...prev, savingKey: false }));
       }
     },
-    [refreshState],
+    [fail, refreshState],
   );
 
   const handleClearKey = React.useCallback(async () => {
@@ -237,34 +318,105 @@ export default function App(): React.ReactElement {
     } finally {
       setBusy((prev) => ({ ...prev, clearingKey: false }));
     }
-  }, [refreshState]);
+  }, [fail, refreshState]);
+
+  const refreshUpdateState = React.useCallback(async () => {
+    if (!capabilities.getUpdateState) return;
+    setUpdateAction('refresh');
+    setUpdateError(null);
+    try {
+      const next = readUpdateState(await getApi().getUpdateState());
+      if (next) setUpdateState(next);
+      else setUpdateError('The update service returned an unrecognized status.');
+    } catch (error: unknown) {
+      setUpdateError(toMessage(error));
+    } finally {
+      setUpdateAction(null);
+    }
+  }, [capabilities.getUpdateState]);
+
+  const handleCheckUpdates = React.useCallback(async () => {
+    if (!capabilities.checkForUpdates) {
+      setUpdateError('Update checks are not available in this build.');
+      return;
+    }
+    setUpdateAction('check');
+    setUpdateError(null);
+    try {
+      const next = readUpdateState(await getApi().checkForUpdates());
+      if (next) setUpdateState(next);
+      else setUpdateError('The update service returned an unrecognized status.');
+    } catch (error: unknown) {
+      setUpdateError(toMessage(error));
+    } finally {
+      setUpdateAction(null);
+    }
+  }, [capabilities.checkForUpdates]);
+
+  const handleInstallUpdate = React.useCallback(async () => {
+    if (!capabilities.installUpdate) {
+      setUpdateError('Installing an update is not available in this build.');
+      return;
+    }
+    setUpdateAction('install');
+    setUpdateError(null);
+    setNotice('Restart requested. PocketBench will close to install the verified update.');
+    try {
+      await getApi().installUpdate();
+    } catch (error: unknown) {
+      setNotice(null);
+      setUpdateError(toMessage(error));
+    } finally {
+      setUpdateAction(null);
+    }
+  }, [capabilities.installUpdate]);
 
   const navigate = React.useCallback((next: NavKey) => {
     setNav(next);
     setActionError(null);
   }, []);
 
-  const viewProps = state
-    ? {
-        state,
-        busy,
-        progress,
-        selectedPlanId,
-        onNavigate: navigate,
-        onScan: handleScan,
-        onSelectPlan: setSelectedPlanId,
-        onInvestigate: handleInvestigate,
-        onApply: handleApply,
-        onUndo: handleUndo,
-        onOpenExternal: handleOpenExternal,
-        onSaveKey: handleSaveKey,
-        onClearKey: handleClearKey,
-      }
-    : null;
+  if (!state) {
+    return (
+      <StartupScreen
+        error={loadError}
+        onRetry={() => {
+          void loadState();
+        }}
+      />
+    );
+  }
 
-  const scanning = busy.scan;
-  const snapshot = state?.snapshot ?? null;
+  const viewProps = {
+    state,
+    busy,
+    progress,
+    selectedPlanId,
+    updates: {
+      state: updateState,
+      error: updateError,
+      action: updateAction,
+      canCheck: capabilities.checkForUpdates,
+      canInstall: capabilities.installUpdate,
+      canRefresh: capabilities.getUpdateState,
+      refresh: refreshUpdateState,
+      check: handleCheckUpdates,
+      install: handleInstallUpdate,
+    },
+    onNavigate: navigate,
+    onScan: handleScan,
+    onSelectPlan: setSelectedPlanId,
+    onInvestigate: handleInvestigate,
+    onApply: handleApply,
+    onUndo: handleUndo,
+    onOpenExternal: handleOpenExternal,
+    onSaveKey: handleSaveKey,
+    onClearKey: handleClearKey,
+  };
+
+  const snapshot = state.snapshot;
   const active = isBusy(busy);
+  const canCancel = Boolean(progress?.cancellable && capabilities.cancelOperation);
 
   return (
     <div className="pb-app">
@@ -312,7 +464,7 @@ export default function App(): React.ReactElement {
                 Lab mode
               </Badge>
             )}
-            <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state?.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state?.settings.hasApiKey ? 'Meta connected' : 'Connect Meta'}</Button>
+            <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state.settings.hasApiKey ? 'Meta connected' : 'Connect Meta'}</Button>
             {active && (
               <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
                 <ArrowClockwiseRegular aria-hidden="true" />
@@ -322,12 +474,12 @@ export default function App(): React.ReactElement {
             <Button
               appearance="primary"
               icon={<ArrowClockwiseRegular />}
-              disabled={!state || scanning}
+              disabled={active}
               onClick={() => {
                 void handleScan();
               }}
             >
-              {scanning ? 'Scanning…' : 'Scan PC'}
+              {busy.scan ? 'Scanning…' : 'Scan PC'}
             </Button>
           </div>
         </header>
@@ -344,11 +496,7 @@ export default function App(): React.ReactElement {
                     size="small"
                     icon={<ArrowClockwiseRegular />}
                     onClick={() => {
-                      setLoadError(null);
-                      getApi()
-                        .getState()
-                        .then((next) => setState(next))
-                        .catch((error: unknown) => setLoadError(toMessage(error)));
+                      void loadState();
                     }}
                   >
                     Retry
@@ -387,61 +535,43 @@ export default function App(): React.ReactElement {
             )}
 
             {progress && (
-              <div className="pb-progress" role="status">
-                <ArrowClockwiseRegular aria-hidden="true" />
-                <span>
-                  <strong>{progress.phase}:</strong> {progress.message}
-                </span>
-                <span style={{ flex: 1 }} />
-                <span className="pb-phase-tag">{progress.phase === 'scan' ? 'Collecting evidence' : 'In progress'}</span>
-              </div>
+              <OperationProgress
+                progress={progress}
+                cancelling={busy.cancelling || cancelPending}
+                canCancel={canCancel}
+                onCancel={() => {
+                  void handleCancel();
+                }}
+              />
             )}
-
           </div>
 
-          <div className="pb-page-intro"><div><h1>{titleFor(nav)}</h1><p>{{overview:'Investigate a problem. Apply a reviewed fix.',windows:'Diagnostics and repairs for your operating system.',apps:'Find an app. Describe the problem. Review the repair.',activity:'Every change, its result, and the way back.',settings:'Model connection, usage, and local preferences.'}[nav]}</p></div><span className="pb-page-context">{nav === 'apps' && snapshot ? `${snapshot.apps.length} installed` : nav === 'overview' ? 'Windows + applications' : ''}</span></div>
+          <div className="pb-page-intro"><div><h1>{titleFor(nav)}</h1><p>{{overview:'Investigate a problem. Apply a reviewed fix.',windows:'Diagnostics and repairs for your operating system.',apps:'Find an app. Describe the problem. Review the repair.',activity:'Every change, its result, and the way back.',settings:'Model connection, updates, usage, and local preferences.'}[nav]}</p></div><span className="pb-page-context">{nav === 'apps' && snapshot ? `${snapshot.apps.length} installed` : nav === 'overview' ? 'Windows + applications' : ''}</span></div>
 
-          {!state ? (
-            <section className="pb-section" aria-label="Loading">
-              {!loadError ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <ArrowClockwiseRegular aria-hidden="true" />
-                  <span className="pb-note">Loading application state…</span>
-                </div>
-              ) : (
-                <p className="pb-note">
-                  <ErrorCircleRegular /> Could not load state. Use Retry above.
-                </p>
-              )}
-            </section>
-          ) : (
-            viewProps && (
-              <React.Fragment>
-                {selectedPlanId && nav !== 'settings' && (
-                  <div className="pb-selected-plan">
-                      <span>Repair plan open below</span>
-                      <Button
-                        appearance="transparent"
-                        size="small"
-                        icon={<DismissRegular />}
-                        aria-label="Close selected plan"
-                        onClick={() => setSelectedPlanId(null)}
-                      />
-                  </div>
-                )}
-                <div className="pb-page-view">
-                  {nav === 'overview' && <OverviewView {...viewProps} />}
-                  {nav === 'windows' && <WindowsView {...viewProps} />}
-                  {nav === 'apps' && <AppsView {...viewProps} />}
-                  {nav === 'activity' && <ActivityView {...viewProps} />}
-                  {nav === 'settings' && <SettingsView {...viewProps} />}
-                </div>
-                <p className="pb-footer-note">
-                  <ShieldCheckmarkRegular /> Changes are recorded. Results are verified. Supported changes can be undone.
-                </p>
-              </React.Fragment>
-            )
-          )}
+          <React.Fragment>
+            {selectedPlanId && nav !== 'settings' && (
+              <div className="pb-selected-plan">
+                <span>Repair plan open below</span>
+                <Button
+                  appearance="transparent"
+                  size="small"
+                  icon={<DismissRegular />}
+                  aria-label="Close selected plan"
+                  onClick={() => setSelectedPlanId(null)}
+                />
+              </div>
+            )}
+            <div className="pb-page-view">
+              {nav === 'overview' && <OverviewView {...viewProps} />}
+              {nav === 'windows' && <WindowsView {...viewProps} />}
+              {nav === 'apps' && <AppsView {...viewProps} />}
+              {nav === 'activity' && <ActivityView {...viewProps} />}
+              {nav === 'settings' && <SettingsView {...viewProps} />}
+            </div>
+            <p className="pb-footer-note">
+              <ShieldCheckmarkRegular /> Changes are recorded. Results are verified. Supported changes can be undone.
+            </p>
+          </React.Fragment>
         </main>
       </div>
     </div>

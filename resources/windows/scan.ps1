@@ -89,11 +89,19 @@ foreach ($name in $selectedServices) {
       $cim = Get-CimInstance -ClassName Win32_Service -Filter ("Name='" + $name + "'") -ErrorAction SilentlyContinue
       if ($cim) { $startType = [string]$cim.StartMode }
     } catch { }
+    # Fixed read-only trigger query only. Read errors leave the value absent; absence never authorizes repair.
+    $triggerStart = $null
+    try {
+      $triggerText = (& sc.exe qtriggerinfo $name 2>&1 | Out-String)
+      if ($triggerText -match 'START SERVICE ON|STOP SERVICE ON') { $triggerStart = $true }
+      elseif ($triggerText -match 'does not have any trigger|FAILED 1168|OpenService FAILED') { $triggerStart = $false }
+    } catch { }
     $services += [pscustomobject]@{
       name = $svc.Name
       displayName = [string]$svc.DisplayName
       status = [string]$svc.Status
       startType = $startType
+      triggerStart = $triggerStart
     }
   } catch { }
 }

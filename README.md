@@ -26,7 +26,7 @@ Community sources can support execution only with independent corroboration. Mis
 
 Requires Windows 11 x64 and Node.js 24. Run `npm ci`, then `npm run dev`. Configure your own Meta Model API key in Settings.
 
-`npm run check` runs type checking, automated tests, and the production build. `npm run dist` creates a Windows installer and portable executable.
+`npm run check` runs type checking, automated tests, and the production build. `npm run dist` creates a Windows installer and portable executable, plus `latest.yml` and blockmap artifacts, without publishing. Do not publish or commit release artifacts from a scoped validation task.
 
 After building, run `node tools/check-ui.cjs` for isolated checks of text contrast, true-black surfaces, icon loading, reduced motion, and 100–200% renderer zoom. `node tools/generate-icons.cjs` regenerates brand exports from the SVG masters. See [brand provenance and interface rules](docs/BRAND.md).
 

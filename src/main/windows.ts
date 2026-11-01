@@ -32,8 +32,8 @@ export function parseWingetListTable(text:string,sourceScope?:'winget'):WingetRo
   }
   return rows
 }
-async function wingetInventory():Promise<WingetRow[]> {
-  return new Promise(resolve=>execFile('winget.exe',['list','--source','winget','--disable-interactivity'],{timeout:20000,maxBuffer:4*1024*1024,windowsHide:true},(error,stdout)=>resolve(error?[]:parseWingetListTable(stdout,'winget'))))
+async function wingetInventory(signal?:AbortSignal):Promise<WingetRow[]> {
+  return new Promise(resolve=>execFile('winget.exe',['list','--source','winget','--disable-interactivity'],{signal,timeout:20000,maxBuffer:4*1024*1024,windowsHide:true},(error,stdout)=>resolve(error?[]:parseWingetListTable(stdout,'winget'))))
 }
 function family(name:string):AppTarget['family'] {
   if(/firefox/i.test(name) && !/thunderbird/i.test(name))return 'firefox'
@@ -60,9 +60,16 @@ export class WindowsEngine {
   private statePath(name:string):string {return join(this.lab.cacheDir(),name+'.json')}
   private readLab<T>(name:string,fallback:T):T {const file=this.statePath(name);return existsSync(file)?JSON.parse(readFileSync(file,'utf8')):fallback}
   private writeLab(name:string,value:unknown):void {if(!this.labMode)throw new Error('Lab state is unavailable in live mode');writeFileSync(this.statePath(name),JSON.stringify(value,null,2))}
-  async scan():Promise<SystemSnapshot> {
-    const raw=await runScript<RawScan>('scan.ps1')
-    const packages=await wingetInventory()
+  async scan(onPartial?:(snapshot:SystemSnapshot)=>void, signal?:AbortSignal):Promise<SystemSnapshot> {
+    signal?.throwIfAborted()
+    const raw=await runScript<RawScan>('scan.ps1',{},60000,{signal})
+    signal?.throwIfAborted()
+    onPartial?.(this.buildSnapshot({...raw,apps:[]},[]))
+    const packages=await wingetInventory(signal)
+    signal?.throwIfAborted()
+    return this.buildSnapshot(raw,packages)
+  }
+  private buildSnapshot(raw:RawScan,packages:WingetRow[]):SystemSnapshot {
     const seen=new Set<string>();const apps:AppTarget[]=[]
     this.iconTargets.clear()
     for(const entry of raw.apps||[]) {
@@ -85,7 +92,7 @@ export class WindowsEngine {
     const diagnostics:DiagnosticEvidence[]=[]
     const proxy=this.labMode?this.readLab<ProxyState>('proxy',proxyState({enable:raw.proxyEnable,server:raw.proxyServer})):proxyState({enable:raw.proxyEnable,server:raw.proxyServer})
     if(proxy.enable)diagnostics.push({id:'windows-proxy',area:'windows',category:'network',title:'A manual proxy is configured',severity:'info',observed:`Manual proxy: ${proxy.server||'not specified'}`,details:['A manual proxy may be intentional. Investigate connection failures before changing it.'],suggestedOperation:'windows.clearUserProxy'})
-    for(const service of services)if(isSelectedService(service.name) && service.status.toLowerCase()==='stopped' && /^(auto|automatic)$/i.test(service.startType))diagnostics.push({id:'service-'+service.name,area:'windows',category:'service',title:service.displayName+' is stopped',severity:'warning',observed:`${service.name} is configured ${service.startType} and reports Stopped.`,details:['Manual and trigger-start services are not classified as broken solely because they are stopped.'],suggestedOperation:'windows.startService',context:{serviceName:service.name}})
+    for(const service of services)if(isSelectedService(service.name) && service.status.toLowerCase()==='stopped' && /^(auto|automatic)$/i.test(service.startType) && service.triggerStart!==true)diagnostics.push({id:'service-'+service.name,area:'windows',category:'service',title:service.displayName+' is stopped',severity:'warning',observed:`${service.name} is configured ${service.startType} and reports Stopped.`,details:['Manual and trigger-start services are not classified as broken solely because they are stopped.'],suggestedOperation:'windows.startService',context:{serviceName:service.name}})
     const diskFree=Number(raw.diskFree||0),diskTotal=Number(raw.diskTotal||0)
     if(diskTotal>0 && diskFree/diskTotal<.1)diagnostics.push({id:'windows-storage',area:'windows',category:'storage',title:'System drive is low on free space',severity:'warning',observed:`${(diskFree/1024**3).toFixed(1)} GiB available of ${(diskTotal/1024**3).toFixed(1)} GiB.`,details:['Cache quarantine preserves data and does not free space when the backup remains on the same drive. Storage findings require a verified applicable repair.']})
     if(Number(raw.memoryTotal)>0 && Number(raw.memoryFree)/Number(raw.memoryTotal)<.1)diagnostics.push({id:'windows-memory',area:'windows',category:'performance',title:'Available memory is low',severity:'warning',observed:`${(Number(raw.memoryFree)/1024**3).toFixed(1)} GiB available.`,details:['Inspect the application causing the problem before changing startup behavior.']})
@@ -101,7 +108,7 @@ export class WindowsEngine {
       return app?app.capabilities.map(operation=>({operation,targetId:app.id,description:OPERATION_META[operation].description,constraints:this.apps.constraints(app,operation)})):[]
     }
     const capabilities:RepairCapability[]=(['windows.clearUserProxy','windows.flushDns','windows.integrityRepair'] as OperationId[]).map(operation=>({operation,targetId:'windows',description:OPERATION_META[operation].description,constraints:OPERATION_META[operation].constraints+' Params: {}'}))
-    for(const service of snapshot.services)if(isSelectedService(service.name) && service.status.toLowerCase()!=='running' && !/disabled/i.test(service.startType))capabilities.push({operation:'windows.startService',targetId:service.name,description:'Start '+service.displayName,constraints:`Params: {"serviceName":${JSON.stringify(service.name)}}. Starts this service without changing its configuration.`})
+    for(const service of snapshot.services)if(isSelectedService(service.name) && service.status.toLowerCase()==='stopped' && /^(auto|automatic)$/i.test(service.startType) && service.triggerStart!==true)capabilities.push({operation:'windows.startService',targetId:service.name,description:'Start '+service.displayName,constraints:`Params: {"serviceName":${JSON.stringify(service.name)}}. Starts this service without changing its configuration.`})
     for(const entry of snapshot.startup)if(entry.id.startsWith('HKCU\\Run\\') && !SECURITY_STARTUP_PATTERN.test(entry.name+' '+entry.command))capabilities.push({operation:'windows.disableStartup',targetId:entry.id,description:'Disable startup: '+entry.name,constraints:`Params: {"entryId":${JSON.stringify(entry.id)}}. Current-user entry only; complete original value is backed up.`})
     return capabilities
   }
@@ -115,6 +122,8 @@ export class WindowsEngine {
     if(step.operation==='windows.startService') {
       const service=snapshot.services.find(service=>service.name===step.params.serviceName)
       if(!service || !isSelectedService(service.name) || /disabled/i.test(service.startType))throw new Error('This service cannot be started by the available repair operation.')
+      if(service.status.toLowerCase()!=='stopped')throw new Error('This service is not in a stopped state. Scan again.')
+      if(service.triggerStart===true)throw new Error('This service uses trigger-start and is not eligible for automatic repair. Scan again.')
       targetId=service.name;label=service.displayName;params={serviceName:service.name}
     } else if(step.operation==='windows.disableStartup') {
       const entry=snapshot.startup.find(entry=>entry.id===step.params.entryId)
@@ -126,7 +135,7 @@ export class WindowsEngine {
     return {...step,targetId,params,title:meta.description+' '+(label==='Windows'?'':label),requiresAdmin:meta.requiresAdmin,reversible:meta.reversible,impact:`${label}: ${meta.impact}`,verification:meta.verification}
   }
   private finish(step:RepairStep,startedAt:string,success:boolean,output:string,backupId?:string,data:Record<string,JsonValue>={}):StepExecution {return {step,startedAt,finishedAt:new Date().toISOString(),success,output:output.slice(0,8000),backupId,data}}
-  async execute(step:RepairStep):Promise<StepExecution> {
+  async execute(step:RepairStep,onProgress?:(message:string,percent?:number)=>void):Promise<StepExecution> {
     const startedAt=new Date().toISOString()
     try {
       const current=this.latest||await this.scan();step=this.validateStep(step,current)
@@ -140,7 +149,7 @@ export class WindowsEngine {
           return this.finish(step,startedAt,true,'Isolated lab state changed; host Windows was untouched.',undefined,{labMode:true})
         }
         const before=operation==='flushDns'?await userOperation('getDnsCache'):null
-        const result=await elevatedOperation(operation,this.dataDirectory,String(step.params.serviceName||''))
+        const result=await elevatedOperation(operation,this.dataDirectory,step.params.serviceName?String(step.params.serviceName):undefined,onProgress)
         return this.finish(step,startedAt,result.success,result.output,undefined,{exitCode:result.exitCode,pendingReboot:result.pendingReboot,before:json(before),...json(result.data||{}) as Record<string,JsonValue>})
       }
       if(step.operation==='windows.clearUserProxy') {

@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   formatBytes,
   formatDateTime,
+  formatElapsed,
   formatUptime,
   formatUSD,
+  isHttpsUrl,
   planStatusLabel,
   runStatusLabel,
+  updateStatusLabel,
 } from '../src/renderer/format';
+import { readUpdateState } from '../src/renderer/api';
 import { findPlan, latestRunForPlan } from '../src/renderer/types';
 import type { AppState } from '../src/shared/contracts';
 
@@ -40,8 +44,7 @@ describe('renderer formatting helpers', () => {
     expect(runStatusLabel('undone')).toBe('Undone');
   });
 
-  it('finds plans and the latest run for a plan', () => {
-    const state = {
+  it('finds plans and the latest run for a plan', () => {    const state = {
       plans: [
         {
           id: 'p1', createdAt: '', title: 't', summary: 's',
@@ -59,5 +62,32 @@ describe('renderer formatting helpers', () => {
     expect(findPlan(state, null)).toBeUndefined();
     expect(latestRunForPlan(state, 'p1')?.id).toBe('r2');
     expect(latestRunForPlan(state, 'missing')).toBeUndefined();
+  });
+
+  it('measures wall-clock elapsed time without estimates', () => {
+    expect(formatElapsed(0)).toBe('0:00');
+    expect(formatElapsed(61000)).toBe('1:01');
+    expect(formatElapsed(3723000)).toBe('1:02:03');
+    expect(formatElapsed(-5)).toBe('0:00');
+  });
+
+  it('accepts only public HTTPS release links', () => {
+    expect(isHttpsUrl('https://github.com/duschino-source/pocketbench-windows/releases/latest')).toBe(true);
+    expect(isHttpsUrl('http://example.com/x')).toBe(false);
+    expect(isHttpsUrl('not-a-url')).toBe(false);
+  });
+
+  it('labels update states deterministically', () => {
+    expect(updateStatusLabel('checking')).toBe('Checking');
+    expect(updateStatusLabel('downloaded')).toBe('Ready to restart');
+    expect(updateStatusLabel('manual')).toBe('Manual update');
+  });
+
+  it('narrows update IPC payloads and drops untrusted percent values', () => {
+    expect(readUpdateState({ status: 'manual', releaseUrl: 'https://github.com/x/releases/latest' })?.supported).toBe(false);
+    expect(readUpdateState({ status: 'downloading', percent: 38.2 })?.percent).toBe(38.2);
+    expect(readUpdateState({ status: 'downloading', percent: 140 })?.percent).toBeUndefined();
+    expect(readUpdateState({ status: 'downloading', percent: '38' })?.percent).toBeUndefined();
+    expect(readUpdateState({ status: 'bogus' })).toBeNull();
   });
 });
