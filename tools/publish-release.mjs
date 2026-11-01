@@ -128,7 +128,9 @@ async function gh(path, token, method = 'GET', body) {
   return res.json()
 }
 async function uploadAsset(uploadUrl, token, filePath, name, contentType = 'application/octet-stream') {
-  const url = new URL(uploadUrl)
+  // Strip the GitHub URI template ('{?name,label}') BEFORE parsing or
+  // appending params; new URL() on the raw template throws/400s.
+  const url = new URL(uploadUrl.split('{', 1)[0])
   if (url.hostname !== UPLOAD_HOST) throw new Error('Unexpected upload destination')
   url.searchParams.set('name', name)
   url.searchParams.set('label', name)
@@ -401,9 +403,15 @@ function selfTest() {
   assert(verifyShaLines(`${'0'.repeat(64)}  a.exe`, dig).length === 0, 'sha ok')
   assert(verifyShaLines(`${'f'.repeat(64)}  a.exe`, dig).length === 1, 'sha mismatch caught')
   assert(verifyShaLines('garbage line', dig).length >= 1, 'malformed caught')
+  // URI-template strip check: upload_url carries '{?name,label}'.
+  const tmpl = 'https://uploads.github.com/repos/o/r/releases/1/assets{?name,label}'
+  const stripped = new URL(tmpl.split('{', 1)[0])
+  assert(stripped.searchParams.get('name') === null, 'template must be stripped before params')
+  stripped.searchParams.set('name', 'a.exe')
+  assert(stripped.search.includes('name=a.exe'), 'params append after strip')
   // arg parser.
-  const p = parseArgs(['--upload-draft', '--publish'])
-  assert(p.uploadDraft && p.publish, 'arg parser flags')
+  const p0 = parseArgs(['--upload-draft', '--publish'])
+  assert(p0.uploadDraft && p0.publish, 'arg parser flags')
   assert(requiredAssets('0.2.0').length === 5, 'five required assets')
   if (process.exitCode) console.error('self-test FAILED')
   else console.log('self-test PASS: hyphen names/parser/sha/args (5 required assets: setup+portable+NSIS blockmap+latest.yml+SHA256SUMS).')
