@@ -72,6 +72,7 @@ jobs:
             pwsh -NoProfile -File tools/test-upgrade.ps1 -OldInstaller 'release/upgrade-prev/prev-setup.exe' -NewInstaller "release/PocketBench-Setup-$version.exe" -OutFile '.local/upgrade-result.json'
           }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: PocketBench-Windows-x64
           path: |

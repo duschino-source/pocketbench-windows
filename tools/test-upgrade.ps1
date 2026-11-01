@@ -56,6 +56,27 @@ $profile = Join-Path $scratch 'profile'
 New-Item -ItemType Directory -Path $installRoot, $profile -Force | Out-Null
 $result = [ordered]@{ ok = $false; old = $OldInstaller; new = $NewInstaller; profile = $profile }
 
+# Canonical JSON for fixture comparison. Pipeline ConvertTo-Json emits $null
+# for empty arrays and unwraps single-element arrays to a bare object, and
+# ConvertFrom-Json coerces ISO date strings to DateTime (dropping trailing
+# .000 on re-serialization), so both sides of every comparison must go
+# through this helper. Content is still fully compared, never just presence.
+function ConvertTo-CanonicalJson($Items) {
+  $list = @($Items | Where-Object { $null -ne $_ })
+  if ($list.Count -eq 0) { return '[]' }
+  return (ConvertTo-Json -InputObject $list -Depth 8 -Compress)
+}
+# Pure in-memory self-test (no installs, no fixture I/O): empty, single,
+# and multiple history arities must all round-trip canonically.
+{
+  $t0 = ConvertTo-CanonicalJson @()
+  $t1 = ConvertTo-CanonicalJson @([pscustomobject]@{ id = 'selftest-1' })
+  $t2 = ConvertTo-CanonicalJson @([pscustomobject]@{ id = 'selftest-1' }, [pscustomobject]@{ id = 'selftest-2' })
+  if ($t0 -ne '[]') { throw "CanonicalJson self-test failed (empty): [$t0]." }
+  if ($t1 -ne '[{"id":"selftest-1"}]') { throw "CanonicalJson self-test failed (single): [$t1]." }
+  if ($t2 -ne '[{"id":"selftest-1"},{"id":"selftest-2"}]') { throw "CanonicalJson self-test failed (multiple): [$t2]." }
+}
+
 function Invoke-InstalledBinary([string]$label) {
   $binary = Join-Path $installRoot 'PocketBench.exe'
   if (-not (Test-Path -LiteralPath $binary)) { throw "$label binary missing: $binary" }
@@ -92,7 +113,10 @@ try {
   }
   $stateFile = Join-Path $profile 'state.json'
   $stateBefore = if (Test-Path -LiteralPath $stateFile) { Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json } else { [pscustomobject]@{ history = @() } }
-  $beforeHistoryJson = @($stateBefore.history) | ConvertTo-Json -Depth 8 -Compress
+  # Baseline captured through the same canonical JSON round-trip as the
+  # post-upgrade side (ConvertFrom-Json date coercion applies equally),
+  # so the "before" snapshot survives the file rewrite below.
+  $beforeHistoryJson = ConvertTo-CanonicalJson @($stateBefore.history)
   $marker = [pscustomobject]@{ id = 'upgrade-test-marker'; planId = 'upgrade-test-plan'; status = 'fixed'; finishedAt = '2026-01-01T00:00:00.000Z' }
   $state = $stateBefore
   $state.history = @($marker) + @($state.history)
@@ -101,7 +125,9 @@ try {
   New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
   $backupFixture = [ordered]@{ id = 'upgrade-test-backup'; kind = 'upgrade-test'; createdAt = '2026-01-01T00:00:00.000Z'; note = 'fixture-content-marker' }
   $backupFixture | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $cacheDir 'backup-upgrade-test.json') -Encoding UTF8
-  $backupFixtureJson = $backupFixture | ConvertTo-Json -Compress
+  # Same canonical round-trip as the post-upgrade side: date strings are
+  # coerced by ConvertFrom-Json on both sides.
+  $backupFixtureJson = Get-Content -LiteralPath (Join-Path $cacheDir 'backup-upgrade-test.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Compress
   @('{"type":"reserve","id":"upgrade-test-budget","amount":0,"label":"upgrade-test","at":"2026-01-01T00:00:00.000Z"}', '{"type":"settle","id":"upgrade-test-budget","amount":0,"at":"2026-01-01T00:00:00.000Z"}') | Set-Content -LiteralPath (Join-Path $profile 'budget.jsonl') -Encoding UTF8
   $budgetBefore = Get-Content -LiteralPath (Join-Path $profile 'budget.jsonl') -Raw
 
@@ -142,7 +168,10 @@ try {
   $after = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
   $afterIds = @($after.history | ForEach-Object { $_.id })
   $missingHistory = @($before.historyIds | Where-Object { $afterIds -notcontains $_ })
-  $afterHistoryJson = @($after.history | Where-Object { $_.id -ne 'upgrade-test-marker' }) | ConvertTo-Json -Depth 8 -Compress
+  # Marker is the seeded alias for the expected before-history; all preserved
+  # entries are compared canonically (canonical JSON, never raw bytes, never
+  # credential material).
+  $afterHistoryJson = ConvertTo-CanonicalJson @($after.history | Where-Object { $_.id -ne 'upgrade-test-marker' })
   $historyContentIntact = ($afterHistoryJson -eq $beforeHistoryJson)
   $afterBackups = @(Get-ChildItem -LiteralPath $cacheDir -Filter 'backup-*.json' | ForEach-Object { $_.Name })
   $missingBackups = @($before.backups | Where-Object { $afterBackups -notcontains $_ })
@@ -166,7 +195,12 @@ try {
   $result.backupContentIntact = $backupContentIntact
   $result.budgetContentIntact = $budgetContentIntact
   $result.ok = ($checks.historyPreserved -and $checks.backupsPreserved -and $checks.budgetPreserved -and $checks.credentialPresent -and $checks.credentialBytesUnchanged)
-  if (-not $result.ok) { throw 'Upgrade preservation check failed.' }
+  if (-not $result.ok) {
+    # Boolean diagnostics only: no credential hashes, no raw fixture bytes.
+    Write-Output "historyPreserved=$($checks.historyPreserved) backupsPreserved=$($checks.backupsPreserved) budgetPreserved=$($checks.budgetPreserved) credentialPresent=$($checks.credentialPresent) credentialBytesUnchanged=$($checks.credentialBytesUnchanged)"
+    Write-Output "historyContentIntact=$historyContentIntact backupContentIntact=$backupContentIntact budgetContentIntact=$budgetContentIntact missingHistoryCount=$($missingHistory.Count) missingBackupsCount=$($missingBackups.Count) beforeIds=$($before.historyIds.Count) afterIds=$($afterIds.Count) beforeBackups=$($before.backups.Count) afterBackups=$($afterBackups.Count)"
+    throw 'Upgrade preservation check failed.'
+  }
   Write-Output 'Upgrade test passed: settings/history/backups/credential-file preserved across installer versions.'
 }
 finally {
