@@ -59,9 +59,13 @@ $result = [ordered]@{ ok = $false; old = $OldInstaller; new = $NewInstaller; pro
 function Invoke-InstalledBinary([string]$label) {
   $binary = Join-Path $installRoot 'PocketBench.exe'
   if (-not (Test-Path -LiteralPath $binary)) { throw "$label binary missing: $binary" }
+  $smokeFile = Join-Path $profile 'smoke-result.json'
+  Remove-Item -LiteralPath $smokeFile -Force -ErrorAction SilentlyContinue
   $proc = Start-Process -FilePath $binary -ArgumentList @('--smoke', "--data-dir=$profile") -WindowStyle Hidden -PassThru
   if (-not $proc.WaitForExit(180000)) { throw "$label launch timed out." }
-  $smoke = Get-Content -LiteralPath (Join-Path $profile 'smoke-result.json') -Raw | ConvertFrom-Json
+  if ($proc.ExitCode -ne 0) { throw "$label exit code $($proc.ExitCode)." }
+  if (-not (Test-Path -LiteralPath $smokeFile)) { throw "$label smoke result missing (stale result refused)." }
+  $smoke = Get-Content -LiteralPath $smokeFile -Raw | ConvertFrom-Json
   if (-not $smoke.ok) { throw "$label smoke failed: $($smoke.error)" }
   return $smoke
 }
@@ -98,7 +102,7 @@ try {
   $backupFixture = [ordered]@{ id = 'upgrade-test-backup'; kind = 'upgrade-test'; createdAt = '2026-01-01T00:00:00.000Z'; note = 'fixture-content-marker' }
   $backupFixture | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $cacheDir 'backup-upgrade-test.json') -Encoding UTF8
   $backupFixtureJson = $backupFixture | ConvertTo-Json -Compress
-  'upgrade-test-budget-marker' | Set-Content -LiteralPath (Join-Path $profile 'budget.jsonl') -Encoding UTF8
+  @('{"type":"reserve","id":"upgrade-test-budget","amount":0,"label":"upgrade-test","at":"2026-01-01T00:00:00.000Z"}', '{"type":"settle","id":"upgrade-test-budget","amount":0,"at":"2026-01-01T00:00:00.000Z"}') | Set-Content -LiteralPath (Join-Path $profile 'budget.jsonl') -Encoding UTF8
   $budgetBefore = Get-Content -LiteralPath (Join-Path $profile 'budget.jsonl') -Raw
 
   # 2c. Seed encrypted dummy credential through the app's own import path,
