@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows:
     runs-on: windows-latest
@@ -28,6 +31,13 @@ jobs:
       - run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Write SHA256 checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -LiteralPath release -File | Where-Object { $_.Extension -in '.exe', '.yml', '.blockmap' }
+          $lines = foreach ($f in $files) { '{0}  {1}' -f (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLower(), $f.Name }
+          Set-Content -LiteralPath release/SHA256SUMS.txt -Value $lines
+          Get-Content -LiteralPath release/SHA256SUMS.txt
       - name: Install and launch in disposable Windows runner
         shell: pwsh
         run: |
@@ -79,6 +89,7 @@ jobs:
             release/*.exe
             release/*.blockmap
             release/latest.yml
+            release/SHA256SUMS.txt
             .local/native-test-result.json
             .local/installed-smoke.json
             .local/upgrade-result.json

@@ -1,5 +1,6 @@
 # PocketBench read-only Windows scan. No system state is modified.
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 
 function Get-RegistryApps {
   $paths = @(
@@ -80,15 +81,33 @@ function Get-StartupEntries {
 
 $selectedServices = @('Dnscache','Dhcp','NlaSvc','W32Time','BITS','wuauserv','Winmgmt')
 $services = @()
-foreach ($name in $selectedServices) {
-  try {
-    $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
-    if ($null -eq $svc) { continue }
-    $startType = ''
+# One batched status query plus one batched start-mode query instead of a
+# Get-Service + Get-CimInstance round trip per service. Output order and shape
+# are unchanged: selected-service order, missing services skipped, empty
+# startType when the start-mode lookup fails.
+$svcByName = @{}
+try { Get-Service -Name $selectedServices -ErrorAction SilentlyContinue | ForEach-Object { $svcByName[$_.Name] = $_ } } catch { }
+$cimByName = @{}
+try {
+  $filter = ($selectedServices | ForEach-Object { "Name='$_'" }) -join ' OR '
+  Get-CimInstance -ClassName Win32_Service -Filter $filter -ErrorAction SilentlyContinue | ForEach-Object { $cimByName[$_.Name] = [string]$_.StartMode }
+} catch { }
+if ($cimByName.Count -eq 0 -and $svcByName.Count -gt 0) {
+  # Batched lookup returned nothing while services exist: retry per service
+  # (original behavior) in case batched filtering is unsupported here.
+  foreach ($name in $selectedServices) {
     try {
       $cim = Get-CimInstance -ClassName Win32_Service -Filter ("Name='" + $name + "'") -ErrorAction SilentlyContinue
-      if ($cim) { $startType = [string]$cim.StartMode }
+      if ($cim) { $cimByName[$name] = [string]$cim.StartMode }
     } catch { }
+  }
+}
+foreach ($name in $selectedServices) {
+  try {
+    if (-not $svcByName.ContainsKey($name)) { continue }
+    $svc = $svcByName[$name]
+    $startType = ''
+    if ($cimByName.ContainsKey($name)) { $startType = $cimByName[$name] }
     # Fixed read-only trigger query only. Read errors leave the value absent; absence never authorizes repair.
     $triggerStart = $null
     try {

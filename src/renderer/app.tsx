@@ -29,10 +29,10 @@ import { idleBusy, isBusy, type NavKey } from './types';
 import { StartupScreen } from './components/StartupScreen';
 import { OperationProgress } from './components/OperationProgress';
 import { OverviewView } from './views/OverviewView';
-import { WindowsView } from './views/WindowsView';
-import { AppsView } from './views/AppsView';
-import { ActivityView } from './views/ActivityView';
-import { SettingsView } from './views/SettingsView';
+const WindowsView = React.lazy(() => import('./views/WindowsView').then((m) => ({ default: m.WindowsView })));
+const AppsView = React.lazy(() => import('./views/AppsView').then((m) => ({ default: m.AppsView })));
+const ActivityView = React.lazy(() => import('./views/ActivityView').then((m) => ({ default: m.ActivityView })));
+const SettingsView = React.lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })));
 
 const brandMark = new URL('../../resources/brand/mark.svg', import.meta.url).href;
 
@@ -562,11 +562,13 @@ export default function App(): React.ReactElement {
               </div>
             )}
             <div className="pb-page-view">
-              {nav === 'overview' && <OverviewView {...viewProps} />}
-              {nav === 'windows' && <WindowsView {...viewProps} />}
-              {nav === 'apps' && <AppsView {...viewProps} />}
-              {nav === 'activity' && <ActivityView {...viewProps} />}
-              {nav === 'settings' && <SettingsView {...viewProps} />}
+              <React.Suspense fallback={<div className="pb-section" role="status"><span className="pb-note">Loading view…</span></div>}>
+                {nav === 'overview' && <OverviewView {...viewProps} />}
+                {nav === 'windows' && <WindowsView {...viewProps} />}
+                {nav === 'apps' && <AppsView {...viewProps} />}
+                {nav === 'activity' && <ActivityView {...viewProps} />}
+                {nav === 'settings' && <SettingsView {...viewProps} />}
+              </React.Suspense>
             </div>
             <p className="pb-footer-note">
               <ShieldCheckmarkRegular /> Changes are recorded. Results are verified. Supported changes can be undone.

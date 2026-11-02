@@ -1,0 +1,77 @@
+name: Release Windows builds
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: node --test tools/gateway.test.mjs
+      - run: npm run check
+      - name: Package Windows installers
+        run: npm run dist
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Install and launch smoke check
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'PocketBench-installed'
+          $smokeData = Join-Path $env:RUNNER_TEMP 'PocketBench-smoke'
+          $installer = Get-ChildItem -LiteralPath release -Filter 'PocketBench Setup *.exe' | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $installer) { throw 'Installer missing from release/.' }
+          $installed = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw 'Installer failed.' }
+          $binary = Join-Path $installRoot 'PocketBench.exe'
+          if (-not (Test-Path -LiteralPath $binary)) { throw 'Installed executable missing.' }
+          $launched = Start-Process -FilePath $binary -ArgumentList @('--smoke', "--data-dir=$smokeData") -WindowStyle Hidden -PassThru
+          if (-not $launched.WaitForExit(180000)) { throw 'Installed app launch timed out.' }
+          $result = Get-Content -LiteralPath (Join-Path $smokeData 'smoke-result.json') -Raw | ConvertFrom-Json
+          if (-not $result.ok -or -not $result.secureRenderer -or $result.labMode) { throw 'Installed application smoke verification failed.' }
+          Write-Output "Installed app scan passed: $($result.appCount) entries; renderer sandbox verified."
+      - name: Write SBOM and SHA256 checksums
+        shell: pwsh
+        run: |
+          npm run sbom --silent > release/pocketbench-sbom.cyclonedx.json
+          node tools/hashes.mjs
+      - name: Attest build provenance (Sigstore, free)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release/*.exe
+            release/SHA256SUMS.txt
+            release/pocketbench-sbom.cyclonedx.json
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $extra = @()
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch' -and $tag -eq 'main') {
+            $tag = 'hackathon-${{ github.run_number }}'
+            $extra += '--prerelease'
+          }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $notes = (Get-Content -LiteralPath .github/release-notes-template.md -Raw) -replace '__TAG__', $tag -replace '__VERSION__', $version
+          Set-Content -LiteralPath release/NOTES.md -Value $notes
+          $assets = @((Get-ChildItem -LiteralPath release -Filter '*.exe' | ForEach-Object { $_.FullName })) + @((Join-Path $PWD 'release/SHA256SUMS.txt'), (Join-Path $PWD 'release/pocketbench-sbom.cyclonedx.json'))
+          gh release create $tag @assets --title "PocketBench $tag" --notes-file release/NOTES.md @extra

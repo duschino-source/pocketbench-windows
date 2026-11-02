@@ -2,15 +2,21 @@
 
 # PocketBench
 
+[![Verify and package Windows](https://github.com/duschino-source/pocketbench-windows/actions/workflows/verify.yml/badge.svg)](https://github.com/duschino-source/pocketbench-windows/actions/workflows/verify.yml)
+[![Latest release](https://img.shields.io/github/v/release/duschino-source/pocketbench-windows)](https://github.com/duschino-source/pocketbench-windows/releases/latest)
+[![Windows](https://img.shields.io/badge/Windows-11%20x64-blue)](https://github.com/duschino-source/pocketbench-windows/releases/latest)
+
 A Windows desktop repair agent powered by Meta Muse Spark. Investigate Windows and app problems, research version-specific fixes, review their impact, apply supported operations, and verify what changed.
 
 Built during the Meta Global AI Developer Hackathon, beginning October 30, 2026. Custom implementation and contribution records are maintained in this standalone repository.
 
 ## Windows download
 
-Download the installer or portable build from [Releases](https://github.com/duschino-source/pocketbench-windows/releases/latest). Windows 11 x64 is the supported target. This event build is unsigned.
+Download the installer or portable build from [Releases](https://github.com/duschino-source/pocketbench-windows/releases/latest). Windows 11 x64 is the supported target. This event build is unsigned, so SmartScreen shows the standard warning; every release ships SHA256 checksums, an SBOM, and Sigstore build provenance — see [signing](docs/SIGNING.md) to verify.
 
 Open PocketBench, scan your PC, and describe a problem under Windows or select an installed app. Investigate lets Muse call bounded local Windows diagnostics, then uses live Meta web search, a structured repair draft, and an independent review. Review sources, affected resources, interruptions, backup coverage, and privileges, then choose **Apply fix**. Only supported local operations can execute. Windows may display UAC.
+
+<!-- TODO(submission): add the unlisted demo link before Nov 4, e.g. [Demo video (3 min)](https://example.com/...) -->
 
 Settings accepts your Meta Model API key. Windows encrypts the stored key locally; the renderer and distributed packages never receive it. Redacted symptom, OS/app version, and selected diagnostic evidence are sent to Meta for investigation. Diagnostic records and repair backups remain local.
 

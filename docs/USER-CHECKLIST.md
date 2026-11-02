@@ -9,6 +9,7 @@ Engineering setup, repository creation, API integration, builds, automated check
 - Record the three-minute demo using docs/DEMO.md. Show genuine before/after checks and only features built during the event.
 - Upload the video somewhere judges can access without requesting permission.
 - Submit the public repository, video link, and every approved human team member by November 4, 2026, 6 PM Pacific / 9 PM Eastern.
+- Cut the release first: `git tag v0.1.0 && git push origin v0.1.0`, then confirm both executables, `SHA256SUMS.txt`, the SBOM, and one attestation check on the release page. Full packet: [submission](SUBMISSION.md).
 
 Submission: https://cerebralvalley.ai/e/meta-ai-developer-hackathon/hackathon/submit
 
