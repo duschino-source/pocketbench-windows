@@ -28,7 +28,10 @@ app.whenReady().then(async()=>{
  for(const label of ['Windows','Apps','Activity','Settings','Overview']){
   await check("document.querySelector('button[aria-label=\""+label+"\"]').click()");
   const expected=label==='Windows'?'Windows diagnostics':label==='Apps'?'Applications':label;
-  await until("document.querySelector('h1')?.textContent === "+JSON.stringify(expected),label);await pause(260);
+  await until("document.querySelector('h1')?.textContent === "+JSON.stringify(expected),label);
+   await until("Boolean(document.querySelector('.pb-page-view'))",label+' view');
+   await check("new Promise(requestAnimationFrame).then(()=>new Promise(requestAnimationFrame))");
+   if(label==='Apps')await until("Boolean(document.querySelector('.pb-app-entry'))",label+' entries');
   const observed=await check("({title:document.querySelector('h1').textContent,animation:getComputedStyle(document.querySelector('.pb-page-view')).animationName,overflow:document.documentElement.scrollWidth>innerWidth})");
   if(observed.overflow)throw Error('Horizontal viewport overflow at '+label);
   observed.contrast=await check(fs.readFileSync(path.join(__dirname,'contrast-check.js'),'utf8'));
