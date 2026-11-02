@@ -34,7 +34,7 @@ jobs:
       - name: Write SHA256 checksums
         shell: pwsh
         run: |
-          $files = Get-ChildItem -LiteralPath release -File | Where-Object { $_.Extension -in '.exe', '.yml', '.blockmap' }
+          $files = Get-ChildItem -LiteralPath release -File | Where-Object { $_.Extension -eq '.exe' }
           $lines = foreach ($f in $files) { '{0}  {1}' -f (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLower(), $f.Name }
           Set-Content -LiteralPath release/SHA256SUMS.txt -Value $lines
           Get-Content -LiteralPath release/SHA256SUMS.txt

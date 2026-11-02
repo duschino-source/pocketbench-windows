@@ -30,9 +30,9 @@ manual steps; everything else is done in this repository.
 ## Release cut checklist (maintainer)
 
 1. `npm run check` green on main; review `docs/VERIFICATION.md`.
-2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
+2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
    `release.yml` builds, smoke-tests the installer, writes the SBOM and
-   checksums, attests provenance, and publishes the GitHub Release.
-3. Confirm the release page shows both `.exe` files, `SHA256SUMS.txt`,
-   and the SBOM; spot-check one hash and one attestation.
+   checksums, attests provenance, and opens a draft GitHub Release.
+3. Review the draft: confirm both `.exe` files, the blockmap, `latest.yml`,
+   `SHA256SUMS.txt`, and the SBOM; spot-check one hash and one attestation, then publish.
 4. Record the demo from `docs/DEMO.md` in a disposable VM only.

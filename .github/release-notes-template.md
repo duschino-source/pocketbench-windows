@@ -1,9 +1,10 @@
 ## PocketBench __TAG__ for Windows 11 x64
 
 Windows and application repair powered by Meta Muse Spark. Pick the
-installer (`PocketBench Setup __VERSION__.exe`) or the portable build
-(`PocketBench __VERSION__.exe`), install, open PocketBench, scan your PC,
-and describe a problem.
+installer (`PocketBench-Setup-__VERSION__.exe`) or the portable build
+(`PocketBench-__VERSION__.exe`), install, open PocketBench, scan your PC,
+and describe a problem. The release also carries `latest.yml` and the NSIS
+blockmap for in-app updates.
 
 ### Before you run it
 
@@ -14,9 +15,9 @@ and describe a problem.
   Sigstore provenance from this repository. See `docs/SIGNING.md`.
 
 ```powershell
-Get-FileHash 'PocketBench Setup __VERSION__.exe' -Algorithm SHA256
+Get-FileHash 'PocketBench-Setup-__VERSION__.exe' -Algorithm SHA256
 # compare with SHA256SUMS.txt, then:
-gh attestation verify 'PocketBench Setup __VERSION__.exe' --repo duschino-source/pocketbench-windows
+gh attestation verify 'PocketBench-Setup-__VERSION__.exe' --repo duschino-source/pocketbench-windows
 ```
 
 ### Judges and reviewers

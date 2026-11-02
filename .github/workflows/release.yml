@@ -36,8 +36,9 @@ jobs:
         run: |
           $installRoot = Join-Path $env:RUNNER_TEMP 'PocketBench-installed'
           $smokeData = Join-Path $env:RUNNER_TEMP 'PocketBench-smoke'
-          $installer = Get-ChildItem -LiteralPath release -Filter 'PocketBench Setup *.exe' | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $installer) { throw 'Installer missing from release/.' }
+          $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+          $installer = Join-Path $PWD "release/PocketBench-Setup-$version.exe"
+          if (-not (Test-Path -LiteralPath $installer)) { throw 'Installer missing from release/.' }
           $installed = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -Wait -PassThru
           if ($installed.ExitCode -ne 0) { throw 'Installer failed.' }
           $binary = Join-Path $installRoot 'PocketBench.exe'
@@ -57,6 +58,8 @@ jobs:
         with:
           subject-path: |
             release/*.exe
+            release/*.blockmap
+            release/latest.yml
             release/SHA256SUMS.txt
             release/pocketbench-sbom.cyclonedx.json
       - name: Create GitHub Release
@@ -65,13 +68,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = '${{ github.ref_name }}'
-          $extra = @()
+          $extra = @('--draft')
           if ('${{ github.event_name }}' -eq 'workflow_dispatch' -and $tag -eq 'main') {
             $tag = 'hackathon-${{ github.run_number }}'
-            $extra += '--prerelease'
+            $extra = @('--prerelease')
           }
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $notes = (Get-Content -LiteralPath .github/release-notes-template.md -Raw) -replace '__TAG__', $tag -replace '__VERSION__', $version
           Set-Content -LiteralPath release/NOTES.md -Value $notes
-          $assets = @((Get-ChildItem -LiteralPath release -Filter '*.exe' | ForEach-Object { $_.FullName })) + @((Join-Path $PWD 'release/SHA256SUMS.txt'), (Join-Path $PWD 'release/pocketbench-sbom.cyclonedx.json'))
+          $assets = @((Get-ChildItem -LiteralPath release -Filter '*.exe' | ForEach-Object { $_.FullName })) + @((Join-Path $PWD 'release/SHA256SUMS.txt'), (Join-Path $PWD 'release/latest.yml'), (Join-Path $PWD ('release/PocketBench-Setup-' + $version + '.exe.blockmap')), (Join-Path $PWD 'release/pocketbench-sbom.cyclonedx.json'))
           gh release create $tag @assets --title "PocketBench $tag" --notes-file release/NOTES.md @extra

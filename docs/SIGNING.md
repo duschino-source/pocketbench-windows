@@ -12,15 +12,19 @@ What every release ships instead, all free:
 - Sigstore build provenance from GitHub Actions, bound to this repository
   and the exact build that produced the files.
 
+Releases open as drafts and are published after review (see the
+[submission packet](SUBMISSION.md)); the checks below work identically on
+draft and published files.
+
 ## Verify a download
 
 ```powershell
 # 1. Check the hash (example file name).
-Get-FileHash 'PocketBench Setup 0.1.0.exe' -Algorithm SHA256
+Get-FileHash 'PocketBench-Setup-0.2.0.exe' -Algorithm SHA256
 Get-Content SHA256SUMS.txt  # compare the matching line
 
 # 2. Check the Sigstore provenance (needs the GitHub CLI).
-gh attestation verify 'PocketBench Setup 0.1.0.exe' --repo duschino-source/pocketbench-windows
+gh attestation verify 'PocketBench-Setup-0.2.0.exe' --repo duschino-source/pocketbench-windows
 ```
 
 Both checks passing means the file is exactly what CI built from the

@@ -16,7 +16,7 @@ Native Windows proxy/service/startup changes were never fault-injected into the 
 
 An unhelpful live search and malformed model output were observed during integration. Both withheld execution. Search targeting and schema-constrained responses were corrected; local validation remains authoritative. Search results can still be insufficient, in which case the app withholds an executable fix.
 
-The release is unsigned. No signing certificate or model key is included in the public source or installers. The demo script calls out real operations and prohibits presenting fixtures as live Windows execution. Releases carry SHA256 checksums, a CycloneDX SBOM, and Sigstore build provenance instead; see [signing](SIGNING.md).
+The release is unsigned. No signing certificate or model key is included in the public source or installers. Releases carry SHA256 checksums, a CycloneDX SBOM, and Sigstore build provenance instead; see [signing](SIGNING.md).
 
 
 The true-black UI update adds native program icon checks: Firefox, Steam, and Obsidian icons were extracted from installed programs, and the Windows generic application icon was read through SHGetStockIconInfo. Unit checks cover discovered-ID access, caching, UNC/URL rejection, links, Store asset confinement, and malformed output. The icon export tool validates every PNG frame and ICO offset.
@@ -28,10 +28,10 @@ Scoped UI/updater validation for the uncommitted v0.2.0 working tree: typecheck 
 
 ## November 2 hardening (this checkout)
 
-- TypeScript checks, the production build, and 74 automated tests (5 environment-gated skips) pass, matching the October 30 baseline.
-- The renderer now code-splits secondary views: the initial bundle is 388 KB instead of one 973 KB file, with 3–10 KB per lazy view. Total build output is about 515 KB versus about 1.1 MB.
-- The read-only scan batches service status and start-mode lookups (2 queries instead of 14) with a per-service fallback, keeping the same JSON shape and service order. A dev-host run returned all 16 keys, 7 services in order, and 192 apps; CIM values were unavailable inside the restricted verification sandbox, so real-Windows start-mode behavior is covered by CI native tests and release smoke checks.
-- Gateway credential tests: reservation/overspend checks pass; the loopback-listener test cannot bind inside the sandbox. Gateway files are unchanged; CI runs both tests.
+- TypeScript checks, the production build, and 160 automated tests (8 environment-gated skips across 19 files) pass; 3 gateway tests and the isolated UI harness (true black, 5.92 minimum contrast, icons, reduced motion, instant navigation, 100–200% zoom) pass as well.
+- The renderer now code-splits secondary views: the initial bundle is 391 KB instead of one 986 KB file, with 3–10 KB per lazy view. Total build output is about 588 KB.
+- The read-only scan batches service status and start-mode lookups (2 queries instead of 14) with a per-service fallback, keeping the same JSON shape, service order, and trigger-start field. A dev-host run returned all 16 keys and 7 services in order; CIM values were unavailable inside the restricted verification sandbox, so real-Windows start-mode behavior is covered by CI native tests and release smoke checks.
+- `node tools/publish-release.mjs --self-test` passes; `npm run sbom` emits valid CycloneDX; `tools/hashes.mjs` covers the release exes only (verified on fixtures, matching the gated 2-exe checksum contract); the self-signed dev-cert helper plus every workflow PowerShell block parse cleanly.
 - `npm run sbom` emits valid CycloneDX, `tools/hashes.mjs` was exercised on a fixture, and the self-signed dev-cert helper plus every workflow PowerShell block parse cleanly.
 - Full installer packaging (`npm run dist`) needs network-downloaded NSIS tools, which the sandbox blocks; it runs in `verify.yml` and the new `release.yml` on tag push instead.
 
