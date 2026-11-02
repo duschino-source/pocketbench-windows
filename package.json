@@ -6,6 +6,7 @@
   "type": "module",
   "main": "out/main/index.js",
   "author": "PocketBench contributors",
+  "engines": { "node": ">=24" },
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
@@ -15,6 +16,11 @@
     "test:native": "vitest run tests/windows-native.test.ts",
     "gateway": "node tools/budget-gateway.mjs",
     "dist": "npm run typecheck && npm run build && electron-builder --win nsis portable --publish never",
+    "clean": "node -e \"for (const p of ['out','release']) require('node:fs').rmSync(p, {recursive: true, force: true})\"",
+    "audit": "npm audit --audit-level=moderate",
+    "sbom": "npm sbom --package-lock-only --sbom-format=cyclonedx --omit=dev",
+    "hashes": "node tools/hashes.mjs",
+    "size": "node tools/size.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
@@ -44,16 +50,21 @@
     "directories": {
       "output": "release"
     },
+    "asar": true,
+    "compression": "maximum",
+    "removePackageScripts": true,
     "files": [
       "out/**/*",
       "resources/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.map"
     ],
     "asarUnpack": [
       "resources/**/*"
     ],
     "win": {
       "icon": "resources/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         {
           "target": "nsis",
@@ -73,6 +84,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
+      "packElevateHelper": false,
       "createDesktopShortcut": true,
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
