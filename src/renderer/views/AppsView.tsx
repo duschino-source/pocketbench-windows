@@ -1,59 +1,246 @@
 import * as React from 'react';
 import { Button, SearchBox } from '@fluentui/react-components';
-import { AppsRegular, ChevronRightRegular, CheckmarkCircleRegular } from '@fluentui/react-icons';
+import { AppsRegular, ChevronRightRegular, CheckmarkCircleRegular, SearchRegular, WrenchRegular } from '@fluentui/react-icons';
 import type { AppTarget, OperationId } from '../../shared/contracts';
-import { findPlan, latestRunForPlan, type ViewProps } from '../types';
-import { PlanDetail } from '../components/PlanDetail';
+import { isBusy, type ViewProps } from '../types';
 import { SymptomForm } from '../components/SymptomForm';
 import { ProgramIcon } from '../components/ProgramIcon';
 
-const OPERATION_LABELS: Partial<Record<OperationId,string>> = {'app.updatePackage':'Package update','app.patchConfig':'Supported settings','app.quarantineCache':'Cache repair','app.restart':'App restart'};
-const isIdentifier=(name:string)=>/^[0-9a-f]{8}-[0-9a-f-]+$/i.test(name);
-function publisher(app:AppTarget):string {
+const OPERATION_LABELS: Partial<Record<OperationId, string>> = {
+  'app.updatePackage': 'Package update',
+  'app.patchConfig': 'Supported settings',
+  'app.quarantineCache': 'Cache repair',
+  'app.restart': 'App restart',
+};
+const SELECTED_APP_KEY = 'pocketbench:selected-app';
+const isIdentifier = (name: string) => /^[0-9a-f]{8}-[0-9a-f-]+$/i.test(name);
+
+function publisher(app: AppTarget): string {
   if (!app.publisher.startsWith('CN=')) return app.publisher || 'Publisher unavailable';
   return app.publisher.match(/(?:^|,\s*)O=([^,]+)/)?.[1] || 'Windows package';
 }
 
-export function AppsView(props:ViewProps):React.ReactElement {
-  const {state,busy}=props;
-  const apps=state.snapshot?.apps ?? [];
-  const [query,setQuery]=React.useState('');
-  const [selectedId,setSelectedId]=React.useState<string|null>(null);
-  const [repairOnly,setRepairOnly]=React.useState(false);
-  const filtered=React.useMemo(()=>{
-    const needle=query.trim().toLowerCase();
-    return apps.filter(app=>(!repairOnly || app.capabilities.length>0) && (!needle || [app.name,app.publisher,app.version,app.id].some(value=>value.toLowerCase().includes(needle))))
-      .sort((a,b)=>Number(isIdentifier(a.name))-Number(isIdentifier(b.name)) || a.name.localeCompare(b.name));
-  },[apps,query,repairOnly]);
-  const selectedApp=apps.find(app=>app.id===selectedId);
-  const selectedPlan=findPlan(state,props.selectedPlanId);
+/** AppsView unmounts while a repair is focused; keep the selection in this tab. */
+function readStoredApp(): string | null {
+  try {
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(SELECTED_APP_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function AppsView(props: ViewProps): React.ReactElement {
+  const { state, busy } = props;
+  const active = isBusy(busy);
+  const apps = state.snapshot?.apps ?? [];
+  const [query, setQuery] = React.useState('');
+  const [selectedId, setSelectedId] = React.useState<string | null>(readStoredApp);
+  const [repairOnly, setRepairOnly] = React.useState(false);
+
+  React.useEffect(() => {
+    try {
+      if (selectedId) sessionStorage.setItem(SELECTED_APP_KEY, selectedId);
+      else sessionStorage.removeItem(SELECTED_APP_KEY);
+    } catch {
+      // Session storage is an enhancement; selection still works in memory.
+    }
+  }, [selectedId]);
+
+  // Scans can drop an app from inventory. Never keep a stale inspector target.
+  React.useEffect(() => {
+    if (!state.snapshot) return;
+    if (selectedId && !state.snapshot.apps.some((app) => app.id === selectedId)) setSelectedId(null);
+  }, [selectedId, state.snapshot]);
+
+  const filtered = React.useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return apps
+      .filter(
+        (app) =>
+          (!repairOnly || app.capabilities.length > 0) &&
+          (!needle ||
+            [app.name, app.publisher, app.version, app.id].some((value) => value.toLowerCase().includes(needle))),
+      )
+      .sort((a, b) => Number(isIdentifier(a.name)) - Number(isIdentifier(b.name)) || a.name.localeCompare(b.name));
+  }, [apps, query, repairOnly]);
+
+  const selectedApp = apps.find((app) => app.id === selectedId);
+  const repairCount = apps.filter((app) => app.capabilities.length > 0).length;
+  const filtersActive = query.trim().length > 0 || repairOnly;
+  const hasInventory = Boolean(state.snapshot);
+
+  const clearFilters = () => {
+    setQuery('');
+    setRepairOnly(false);
+  };
+
   return (
     <div>
       <section className="pb-section pb-apps-workspace" aria-label="Application workspace">
         <div className="pb-apps-catalog">
-          <div className="pb-apps-toolbar"><SearchBox placeholder="Search applications…" aria-label="Search installed applications" value={query} onChange={(_,data)=>setQuery(data.value??'')} /><div className="pb-app-filters" role="group" aria-label="Application filters"><Button size="small" appearance="subtle" aria-pressed={!repairOnly} onClick={()=>setRepairOnly(false)}>All apps <span>{apps.length}</span></Button><Button size="small" appearance="subtle" aria-pressed={repairOnly} onClick={()=>setRepairOnly(true)}>Repair tools <span>{apps.filter(app=>app.capabilities.length>0).length}</span></Button></div></div>
+          <div className="pb-apps-toolbar">
+            <SearchBox
+              placeholder="Search applications…"
+              aria-label="Search installed applications"
+              value={query}
+              onChange={(_, data) => setQuery(data.value ?? '')}
+            />
+            <div className="pb-app-filters" role="group" aria-label="Application filters">
+              <Button size="small" appearance="subtle" aria-pressed={!repairOnly} onClick={() => setRepairOnly(false)}>
+                All apps <span>{apps.length}</span>
+              </Button>
+              <Button size="small" appearance="subtle" aria-pressed={repairOnly} onClick={() => setRepairOnly(true)}>
+                Repair tools <span>{repairCount}</span>
+              </Button>
+            </div>
+          </div>
+
           <ul className="pb-app-list" aria-label="Application inventory">
-            {filtered.map((app,index)=><li key={app.id}><button type="button" className="pb-app-entry" aria-pressed={selectedId===app.id} onClick={()=>setSelectedId(app.id)}>
-              <ProgramIcon app={app} eager={index<12} />
-              <span className="pb-app-copy"><span className="pb-app-name">{app.name}</span><span className="pb-app-meta">{publisher(app)}{app.version?' · '+app.version:''}</span></span>
-              {app.capabilities.length>0 && <span className="pb-capability-dot" title="Repair tools available" aria-label="Repair tools available" />}<ChevronRightRegular className="pb-app-chevron" />
-            </button></li>)}
+            {filtered.map((app, index) => (
+              <li key={app.id}>
+                <button
+                  type="button"
+                  className="pb-app-entry"
+                  aria-pressed={selectedId === app.id}
+                  onClick={() => setSelectedId(app.id)}
+                >
+                  <ProgramIcon app={app} eager={index < 12} />
+                  <span className="pb-app-copy">
+                    <span className="pb-app-name">{app.name}</span>
+                    <span className="pb-app-meta">
+                      {publisher(app)}
+                      {app.version ? ' · ' + app.version : ''}
+                    </span>
+                  </span>
+                  {app.capabilities.length > 0 && (
+                    <span
+                      className="pb-capability-tag"
+                      title={`${app.capabilities.length} repair tool${app.capabilities.length === 1 ? '' : 's'} available`}
+                    >
+                      <WrenchRegular aria-hidden="true" />
+                      Tools {app.capabilities.length}
+                    </span>
+                  )}
+                  <ChevronRightRegular className="pb-app-chevron" />
+                </button>
+              </li>
+            ))}
           </ul>
-          {!filtered.length && <div className="pb-empty"><AppsRegular /><h3>{!state.snapshot?'No inventory yet':'No matching apps'}</h3><p>{!state.snapshot?'Scan this PC to discover installed applications.':'Try another search or switch to All apps.'}</p></div>}
-          <div className="pb-catalog-foot">{filtered.length} of {apps.length} applications</div>
+
+          {!filtered.length && (
+            <div className="pb-empty pb-empty-compact">
+              {!hasInventory ? (
+                <>
+                  <SearchRegular />
+                  <h3>No inventory yet</h3>
+                  <p>Scan this PC to discover installed applications and the repair tools each one supports.</p>
+                  <Button appearance="primary" disabled={active} onClick={() => void props.onScan()}>
+                    {busy.scan ? 'Scanning…' : 'Scan this PC'}
+                  </Button>
+                </>
+              ) : apps.length === 0 ? (
+                <>
+                  <AppsRegular />
+                  <h3>No applications found</h3>
+                  <p>The last scan did not return an application inventory. Scan again after checking local permissions.</p>
+                  <Button appearance="secondary" disabled={active} onClick={() => void props.onScan()}>
+                    {busy.scan ? 'Scanning…' : 'Scan again'}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <AppsRegular />
+                  <h3>No matching apps</h3>
+                  <p>
+                    {filtersActive
+                      ? 'Clear the search or switch back to All apps to see the full inventory.'
+                      : 'The inventory is empty for this filter.'}
+                  </p>
+                  {filtersActive ? (
+                    <Button appearance="secondary" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  ) : (
+                    <Button appearance="secondary" disabled={active} onClick={() => void props.onScan()}>
+                      {busy.scan ? 'Scanning…' : 'Scan again'}
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="pb-catalog-foot">
+            {filtered.length} of {apps.length} applications
+          </div>
         </div>
+
         <div className="pb-app-inspector">
-          {!selectedApp?<div className="pb-inspector-empty"><div className="pb-inspector-graphic"><AppsRegular /></div><h2>Let’s look at an app</h2><p>Select an application to see available repair tools and investigate a problem.</p><span>Installed version · Supported repairs · Sources</span></div>
-            :<div className="pb-inspector-content" key={selectedApp.id}>
-              <div className="pb-inspector-heading"><ProgramIcon app={selectedApp} large /><div><h2>{selectedApp.name}</h2><p>{publisher(selectedApp)} · {selectedApp.version || 'Version unavailable'}</p></div></div>
-              <div className="pb-app-tools"><span className="pb-eyebrow">AVAILABLE TOOLS</span><div>{selectedApp.capabilities.length ? selectedApp.capabilities.map(operation=><span className="pb-tool-tag" key={operation}><CheckmarkCircleRegular />{OPERATION_LABELS[operation] || operation}</span>):<span className="pb-note">Research available. No automatic repair tools detected.</span>}</div></div>
+          {!selectedApp ? (
+            <div className="pb-inspector-empty">
+              <div className="pb-inspector-graphic">
+                <AppsRegular />
+              </div>
+              <h2>Let’s look at an app</h2>
+              <p>Select an application to see available repair tools and investigate a problem.</p>
+              <span>{hasInventory ? 'Installed version · Supported repairs · Sources' : 'Scan first to list installed apps'}</span>
+            </div>
+          ) : (
+            <div className="pb-inspector-content" key={selectedApp.id}>
+              <div className="pb-inspector-heading">
+                <ProgramIcon app={selectedApp} large />
+                <div>
+                  <h2>{selectedApp.name}</h2>
+                  <p>
+                    {publisher(selectedApp)} · {selectedApp.version || 'Version unavailable'}
+                  </p>
+                </div>
+              </div>
+              <div className="pb-app-tools">
+                <span className="pb-eyebrow">AVAILABLE TOOLS</span>
+                <div>
+                  {selectedApp.capabilities.length ? (
+                    selectedApp.capabilities.map((operation) => (
+                      <span className="pb-tool-tag" key={operation}>
+                        <CheckmarkCircleRegular />
+                        {OPERATION_LABELS[operation] || operation}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="pb-note">Research available. No automatic repair tools detected.</span>
+                  )}
+                </div>
+              </div>
               <SymptomForm {...props} app={selectedApp} />
-              <details className="pb-technical"><summary>Installation details</summary><dl className="pb-kv"><dt>Identifier</dt><dd>{selectedApp.id}</dd>{selectedApp.installLocation&&<><dt>Location</dt><dd>{selectedApp.installLocation}</dd></>}{selectedApp.executable&&<><dt>Executable</dt><dd>{selectedApp.executable}</dd></>}{selectedApp.packageId&&<><dt>Package</dt><dd>{selectedApp.packageId}</dd></>}</dl></details>
-            </div>}
+              <details className="pb-technical">
+                <summary>Installation details</summary>
+                <dl className="pb-kv">
+                  <dt>Identifier</dt>
+                  <dd>{selectedApp.id}</dd>
+                  {selectedApp.installLocation && (
+                    <>
+                      <dt>Location</dt>
+                      <dd>{selectedApp.installLocation}</dd>
+                    </>
+                  )}
+                  {selectedApp.executable && (
+                    <>
+                      <dt>Executable</dt>
+                      <dd>{selectedApp.executable}</dd>
+                    </>
+                  )}
+                  {selectedApp.packageId && (
+                    <>
+                      <dt>Package</dt>
+                      <dd>{selectedApp.packageId}</dd>
+                    </>
+                  )}
+                </dl>
+              </details>
+            </div>
+          )}
         </div>
       </section>
-      {selectedPlan && <PlanDetail plan={selectedPlan} busy={busy} latestRun={latestRunForPlan(state,selectedPlan.id)} onApply={props.onApply} onOpenExternal={props.onOpenExternal} />}
     </div>
   );
 }
-

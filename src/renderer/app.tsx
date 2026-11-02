@@ -9,13 +9,13 @@ import {
 import {
   AppsRegular,
   ArrowClockwiseRegular,
+  ArrowLeftRegular,
   BeakerRegular,
   DesktopPulseRegular,
   DismissRegular,
   HistoryRegular,
   HomeRegular,
   SettingsRegular,
-  ShieldCheckmarkRegular,
 } from '@fluentui/react-icons';
 import type {
   AppState,
@@ -25,7 +25,8 @@ import type {
 } from '../shared/contracts';
 import { getApi, readApiAvailability, readUpdateState, toMessage } from './api';
 import { formatDateTime } from './format';
-import { idleBusy, isBusy, type NavKey } from './types';
+import { findPlan, idleBusy, isBusy, latestRunForPlan, titleFor, type NavKey } from './types';
+import { PlanDetail } from './components/PlanDetail';
 import { StartupScreen } from './components/StartupScreen';
 import { OperationProgress } from './components/OperationProgress';
 import { OverviewView } from './views/OverviewView';
@@ -43,21 +44,6 @@ const NAV: Array<{ key: NavKey; label: string; icon: React.ReactElement }> = [
   { key: 'activity', label: 'Activity', icon: <HistoryRegular /> },
   { key: 'settings', label: 'Settings', icon: <SettingsRegular /> },
 ];
-
-function titleFor(nav: NavKey): string {
-  switch (nav) {
-    case 'overview':
-      return 'Overview';
-    case 'windows':
-      return 'Windows diagnostics';
-    case 'apps':
-      return 'Applications';
-    case 'activity':
-      return 'Activity';
-    case 'settings':
-      return 'Settings';
-  }
-}
 
 export default function App(): React.ReactElement {
   const [state, setState] = React.useState<AppState | null>(null);
@@ -77,6 +63,31 @@ export default function App(): React.ReactElement {
   const cancelRequested = React.useRef(false);
   const lastPhase = React.useRef<ProgressEvent['phase'] | null>(null);
   const loadId = React.useRef(0);
+  const contentRef = React.useRef<HTMLElement | null>(null);
+  const pageHeadingRef = React.useRef<HTMLHeadingElement | null>(null);
+  const planHeadingRef = React.useRef<HTMLHeadingElement | null>(null);
+  const planOrigin = React.useRef<{ element: HTMLElement | null; nav: NavKey; scrollTop: number } | null>(null);
+  const previousPlanId = React.useRef<string | null>(null);
+  const selectedPlan = state && nav !== 'settings' ? findPlan(state, selectedPlanId) : undefined;
+
+  const rememberPlanOrigin = React.useCallback(() => {
+    const active = document.activeElement;
+    planOrigin.current = {
+      element: active instanceof HTMLElement && active !== document.body ? active : null,
+      nav,
+      scrollTop: contentRef.current?.scrollTop ?? 0,
+    };
+  }, [nav]);
+
+  const selectPlan = React.useCallback(
+    (id: string | null) => {
+      if (id) rememberPlanOrigin();
+      setSelectedPlanId(id);
+    },
+    [rememberPlanOrigin],
+  );
+
+  const closePlan = React.useCallback(() => setSelectedPlanId(null), []);
 
   const loadState = React.useCallback(async () => {
     const requestId = ++loadId.current;
@@ -215,6 +226,7 @@ export default function App(): React.ReactElement {
 
   const handleInvestigate = React.useCallback(
     async (request: InvestigateRequest) => {
+      rememberPlanOrigin();
       setActionError(null);
       setNotice(null);
       setBusy((prev) => ({ ...prev, investigating: true }));
@@ -230,7 +242,7 @@ export default function App(): React.ReactElement {
         setProgress(null);
       }
     },
-    [fail, refreshState],
+    [fail, refreshState, rememberPlanOrigin],
   );
 
   const handleApply = React.useCallback(
@@ -372,9 +384,31 @@ export default function App(): React.ReactElement {
   }, [capabilities.installUpdate]);
 
   const navigate = React.useCallback((next: NavKey) => {
+    planOrigin.current = null;
+    setSelectedPlanId(null);
+    if (contentRef.current) contentRef.current.scrollTop = 0;
     setNav(next);
     setActionError(null);
   }, []);
+
+  React.useLayoutEffect(() => {
+    const previous = previousPlanId.current;
+    previousPlanId.current = selectedPlan?.id ?? null;
+
+    if (selectedPlan) {
+      if (contentRef.current) contentRef.current.scrollTop = 0;
+      planHeadingRef.current?.focus();
+      return;
+    }
+    if (!previous) return;
+
+    const origin = planOrigin.current;
+    planOrigin.current = null;
+    if (!origin || origin.nav !== nav) return;
+    if (contentRef.current) contentRef.current.scrollTop = origin.scrollTop;
+    if (origin.element?.isConnected) origin.element.focus({ preventScroll: true });
+    else pageHeadingRef.current?.focus();
+  }, [nav, selectedPlan?.id]);
 
   if (!state) {
     return (
@@ -405,7 +439,7 @@ export default function App(): React.ReactElement {
     },
     onNavigate: navigate,
     onScan: handleScan,
-    onSelectPlan: setSelectedPlanId,
+    onSelectPlan: selectPlan,
     onInvestigate: handleInvestigate,
     onApply: handleApply,
     onUndo: handleUndo,
@@ -427,17 +461,16 @@ export default function App(): React.ReactElement {
           </div>
           <div className="pb-brand-text">
             <div className="pb-brand-name">PocketBench</div>
-            <div className="pb-brand-sub">Repair desktop</div>
+            <div className="pb-brand-sub">Repair workspace</div>
           </div>
         </div>
 
-        <div className="pb-nav-label">Workspace</div>
         <div className="pb-nav">
           {NAV.map((item) => (
             <Button
               key={item.key}
               aria-label={item.label}
-              className={'pb-nav-button' + (item.key === 'settings' ? ' pb-nav-settings' : '')}
+              className="pb-nav-button"
               appearance="subtle"
               icon={item.icon}
               aria-current={nav === item.key ? 'page' : undefined}
@@ -447,16 +480,10 @@ export default function App(): React.ReactElement {
             </Button>
           ))}
         </div>
-
-        <div className="pb-sidebar-foot">
-          <ShieldCheckmarkRegular />
-          <div><strong>Changes you control</strong><span>Review before applying</span></div>
-        </div>
       </nav>
 
       <div className="pb-main">
         <header className="pb-header">
-          <div className="pb-breadcrumb"><DesktopPulseRegular /><span>This PC</span><span className="pb-breadcrumb-divider">/</span><span>{titleFor(nav)}</span></div>
           <div className="pb-header-spacer" />
           <div className="pb-header-meta">
             {snapshot?.labMode && (
@@ -464,27 +491,29 @@ export default function App(): React.ReactElement {
                 Lab mode
               </Badge>
             )}
-            <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state.settings.hasApiKey ? 'Meta connected' : 'Connect Meta'}</Button>
+            <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state.settings.hasApiKey ? 'Meta connected' : 'Meta not connected'}</Button>
             {active && (
-              <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="pb-working" aria-live="polite">
                 <ArrowClockwiseRegular aria-hidden="true" />
                 Working…
               </span>
             )}
-            <Button
-              appearance="primary"
-              icon={<ArrowClockwiseRegular />}
-              disabled={active}
-              onClick={() => {
-                void handleScan();
-              }}
-            >
-              {busy.scan ? 'Scanning…' : 'Scan PC'}
-            </Button>
+            {snapshot && (
+              <Button
+                appearance="secondary"
+                icon={<ArrowClockwiseRegular />}
+                disabled={active}
+                onClick={() => {
+                  void handleScan();
+                }}
+              >
+                {busy.scan ? 'Scanning…' : 'Scan again'}
+              </Button>
+            )}
           </div>
         </header>
 
-        <main className="pb-content" aria-live="off">
+        <main className="pb-content" aria-live="off" ref={contentRef}>
           <div className="pb-banners" aria-live="polite">
             {loadError && (
               <MessageBar intent="error">
@@ -546,21 +575,33 @@ export default function App(): React.ReactElement {
             )}
           </div>
 
-          <div className="pb-page-intro"><div><h1>{titleFor(nav)}</h1><p>{{overview:'Investigate a problem. Apply a reviewed fix.',windows:'Diagnostics and repairs for your operating system.',apps:'Find an app. Describe the problem. Review the repair.',activity:'Every change, its result, and the way back.',settings:'Model connection, updates, usage, and local preferences.'}[nav]}</p></div><span className="pb-page-context">{nav === 'apps' && snapshot ? `${snapshot.apps.length} installed` : nav === 'overview' ? 'Windows + applications' : ''}</span></div>
-
-          <React.Fragment>
-            {selectedPlanId && nav !== 'settings' && (
-              <div className="pb-selected-plan">
-                <span>Repair plan open below</span>
-                <Button
-                  appearance="transparent"
-                  size="small"
-                  icon={<DismissRegular />}
-                  aria-label="Close selected plan"
-                  onClick={() => setSelectedPlanId(null)}
-                />
+          <div
+            className="pb-page-shell"
+            hidden={Boolean(selectedPlan)}
+            inert={selectedPlan ? true : undefined}
+          >
+            <div className="pb-page-intro">
+              <div>
+                <h1 ref={pageHeadingRef} tabIndex={-1}>
+                  {titleFor(nav)}
+                </h1>
+                <p>
+                  {
+                    {
+                      overview: 'Find what’s wrong. Review every repair before it applies.',
+                      windows: 'Diagnostics and repairs for your operating system.',
+                      apps: 'Find an app. Describe the problem. Review the repair.',
+                      activity: 'Every change, its result, and the way back.',
+                      settings: 'Model connection, updates, usage, and local preferences.',
+                    }[nav]
+                  }
+                </p>
               </div>
-            )}
+              {nav === 'apps' && snapshot && (
+                <span className="pb-page-context">{snapshot.apps.length} installed</span>
+              )}
+            </div>
+
             <div className="pb-page-view">
               {nav === 'overview' && <OverviewView {...viewProps} />}
               {nav === 'windows' && <WindowsView {...viewProps} />}
@@ -568,10 +609,26 @@ export default function App(): React.ReactElement {
               {nav === 'activity' && <ActivityView {...viewProps} />}
               {nav === 'settings' && <SettingsView {...viewProps} />}
             </div>
-            <p className="pb-footer-note">
-              <ShieldCheckmarkRegular /> Changes are recorded. Results are verified. Supported changes can be undone.
-            </p>
-          </React.Fragment>
+          </div>
+
+          {selectedPlan && (
+            <div className="pb-plan-focus">
+              <div className="pb-plan-focus-bar">
+                <Button appearance="subtle" size="small" icon={<ArrowLeftRegular />} onClick={closePlan}>
+                  Back to {titleFor(nav)}
+                </Button>
+                <span className="pb-plan-focus-crumb">Repair review</span>
+              </div>
+              <PlanDetail
+                plan={selectedPlan}
+                busy={busy}
+                latestRun={latestRunForPlan(state, selectedPlan.id)}
+                headingRef={planHeadingRef}
+                onApply={handleApply}
+                onOpenExternal={handleOpenExternal}
+              />
+            </div>
+          )}
         </main>
       </div>
     </div>

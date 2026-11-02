@@ -1,13 +1,54 @@
 import type {
   AppState,
+  DiagnosticEvidence,
   InvestigateRequest,
   ProgressEvent,
   RepairPlan,
   RepairRun,
+  SymptomCategory,
   UpdateState,
 } from '../shared/contracts';
 
 export type NavKey = 'overview' | 'windows' | 'apps' | 'activity' | 'settings';
+
+export function titleFor(nav: NavKey): string {
+  switch (nav) {
+    case 'overview':
+      return 'Overview';
+    case 'windows':
+      return 'Windows diagnostics';
+    case 'apps':
+      return 'Applications';
+    case 'activity':
+      return 'Activity';
+    case 'settings':
+      return 'Settings';
+  }
+}
+
+const SEVERITY_ORDER: Record<DiagnosticEvidence['severity'], number> = {
+  critical: 0,
+  warning: 1,
+  info: 2,
+};
+
+/** Present the most urgent finding first whenever the UI says "most urgent first". */
+export function sortFindingsByUrgency<T extends Pick<DiagnosticEvidence, 'severity'>>(items: readonly T[]): T[] {
+  return items.slice().sort((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity]);
+}
+
+export interface PresetChoice {
+  label: string;
+  symptom: string;
+  category: SymptomCategory;
+}
+
+/** General presets carry their category so picking one enables investigate. */
+export const GENERAL_PRESETS: readonly PresetChoice[] = [
+  { label: 'Internet connection', symptom: 'Wi-Fi connects but websites won’t load', category: 'connectivity' },
+  { label: 'Slow startup', symptom: 'Slow startup', category: 'performance' },
+  { label: 'Windows Update', symptom: 'Windows Update fails', category: 'updates' },
+];
 
 export interface BusyState {
   scan: boolean;

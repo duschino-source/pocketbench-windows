@@ -2,15 +2,19 @@ import * as React from 'react';
 import { Button, Textarea } from '@fluentui/react-components';
 import { ArrowRightRegular, SearchRegular } from '@fluentui/react-icons';
 import type { AppTarget, SymptomCategory } from '../../shared/contracts';
+import { categoryFromEvidence } from '../../shared/investigation';
+import { GENERAL_PRESETS, isBusy } from '../types';
 import type { ViewProps } from '../types';
 
-type Props = Pick<ViewProps, 'state' | 'busy' | 'onInvestigate' | 'onNavigate'> & { app?: AppTarget };
+type Props = Pick<ViewProps, 'state' | 'busy' | 'onInvestigate' | 'onNavigate' | 'onScan'> & {
+  app?: AppTarget;
+  compact?: boolean;
+};
 
 const CATEGORIES: Array<{ value: SymptomCategory; label: string }> = [
   { value: 'performance', label: 'Performance' },
   { value: 'connectivity', label: 'Connectivity' },
   { value: 'updates', label: 'Updates' },
-  { value: 'app', label: 'App' },
 ];
 
 const PRESETS: Record<SymptomCategory, string[]> = {
@@ -20,61 +24,73 @@ const PRESETS: Record<SymptomCategory, string[]> = {
   app: ['App won’t open', 'App crashes on launch', 'Feature stopped working'],
 };
 
-const GENERAL_PRESETS = ['Internet connection', 'Slow startup', 'Windows Update'];
-
-export function SymptomForm({ state, busy, app, onInvestigate, onNavigate }: Props): React.ReactElement {
+export function SymptomForm({ state, busy, app, onInvestigate, onNavigate, onScan, compact = false }: Props): React.ReactElement {
   const [symptom, setSymptom] = React.useState('');
   const [category, setCategory] = React.useState<SymptomCategory | null>(app ? 'app' : null);
   const input = React.useRef<HTMLTextAreaElement>(null);
   const id = React.useId();
   const categoryId = React.useId();
+  const active = isBusy(busy);
 
   React.useEffect(() => {
     setSymptom('');
     setCategory(app ? 'app' : null);
   }, [app?.id]);
 
-  const presets = category ? PRESETS[category] : GENERAL_PRESETS;
-  const available = Boolean(state.snapshot && category);
+  const lockedApp = Boolean(app);
+  const presets = lockedApp ? PRESETS.app : category ? PRESETS[category] : null;
+  // Free text stays usable: backend classifies when no explicit category is set.
+  const available = Boolean(state.snapshot) && !active;
   const selectedLabel = category ? CATEGORIES.find((item) => item.value === category)?.label : null;
 
   return (
     <form
-      className="pb-composer"
+      className={'pb-composer' + (compact ? ' pb-composer-compact' : '')}
       onSubmit={(event) => {
         event.preventDefault();
-        if (!available || busy.investigating || !symptom.trim()) return;
+        if (!available || !symptom.trim()) return;
         void onInvestigate({
           symptom: symptom.trim(),
           ...(app ? { appId: app.id } : {}),
+          // App category stays on app targets; general app choice routes to Apps.
           ...(category ? { category } : {}),
         });
       }}
     >
       <label htmlFor={id} className="pb-composer-label">
-        {app ? 'What’s happening with ' + app.name + '?' : 'What needs fixing?'}
+        {app ? 'What’s happening with ' + app.name + '?' : compact ? 'Describe another problem' : 'What needs fixing?'}
       </label>
-      <p className="pb-composer-description">
-        Describe the problem. PocketBench will investigate and prepare a repair for you to review.
-      </p>
+      {!compact && (
+        <p className="pb-composer-description">
+          Describe the problem. PocketBench investigates and prepares a repair for review.
+        </p>
+      )}
 
-      <span className="pb-field-label" id={categoryId}>
-        Which area is affected?
-      </span>
-      <div className="pb-category-picker" role="group" aria-labelledby={categoryId}>
-        {CATEGORIES.map((item) => (
-          <Button
-            key={item.value}
-            type="button"
-            size="small"
-            appearance="subtle"
-            aria-pressed={category === item.value}
-            onClick={() => setCategory((current) => (current === item.value ? null : item.value))}
-          >
-            {item.label}
-          </Button>
-        ))}
-      </div>
+      {!lockedApp && (
+        <React.Fragment>
+          <span className="pb-field-label" id={categoryId}>
+            Affected area (optional)
+          </span>
+          <div className="pb-category-picker" role="group" aria-labelledby={categoryId}>
+            {CATEGORIES.map((item) => (
+              <Button
+                key={item.value}
+                type="button"
+                size="small"
+                appearance="subtle"
+                aria-pressed={category === item.value}
+                disabled={active}
+                onClick={() => setCategory((current) => (current === item.value ? null : item.value))}
+              >
+                {item.label}
+              </Button>
+            ))}
+            <Button type="button" size="small" appearance="subtle" onClick={() => onNavigate('apps')}>
+              Specific app <ArrowRightRegular />
+            </Button>
+          </div>
+        </React.Fragment>
+      )}
 
       <Textarea
         ref={input}
@@ -88,50 +104,70 @@ export function SymptomForm({ state, busy, app, onInvestigate, onNavigate }: Pro
               ? `Describe the ${selectedLabel.toLowerCase()} problem, including any error message.`
               : 'For example, Wi-Fi connects but websites won’t load…'
         }
-        rows={3}
+        rows={compact ? 2 : 3}
         resize="vertical"
         className="pb-symptom-input"
+        disabled={active}
       />
 
       <div className="pb-presets" aria-label="Example symptoms">
-        {presets.map((preset) => (
-          <Button
-            key={preset}
-            type="button"
-            size="small"
-            appearance="subtle"
-            onClick={() => {
-              setSymptom(preset);
-              input.current?.focus();
-            }}
-          >
-            {preset}
-            <ArrowRightRegular />
-          </Button>
-        ))}
+        {presets
+          ? presets.map((preset) => (
+              <Button
+                key={preset}
+                type="button"
+                size="small"
+                appearance="subtle"
+                disabled={active}
+                onClick={() => {
+                  setSymptom(preset);
+                  input.current?.focus();
+                }}
+              >
+                {preset}
+                <ArrowRightRegular />
+              </Button>
+            ))
+          : GENERAL_PRESETS.map((preset) => (
+              <Button
+                key={preset.label}
+                type="button"
+                size="small"
+                appearance="subtle"
+                disabled={active}
+                onClick={() => {
+                  setSymptom(preset.symptom);
+                  setCategory(preset.category);
+                  input.current?.focus();
+                }}
+              >
+                {preset.label}
+                <ArrowRightRegular />
+              </Button>
+            ))}
       </div>
 
       <div className="pb-composer-actions">
         <span className="pb-note">
-          {!state.snapshot
-            ? 'Scan this PC to get started.'
-            : !category
-              ? 'Choose an affected area above, then investigate. Local checks work offline.'
+          {compact
+            ? 'Local checks work offline. You review every change.'
+            : !state.snapshot
+              ? 'Works offline. Scan first; no key needed.'
               : !state.settings.hasApiKey
                 ? 'Local checks work offline. Meta enables deeper research.'
                 : 'Sources and impact shown before you apply.'}
         </span>
-        {!state.settings.hasApiKey && !state.snapshot ? (
-          <Button type="button" appearance="primary" onClick={() => onNavigate('settings')}>
-            Connect Meta <ArrowRightRegular />
+        {!state.snapshot ? (
+          <Button type="button" appearance="primary" icon={<SearchRegular />} disabled={active} onClick={() => void onScan()}>
+            {busy.scan ? 'Scanning…' : 'Scan this PC'}
           </Button>
         ) : (
           <Button
             type="submit"
             appearance="primary"
             icon={<SearchRegular />}
-            disabled={!available || busy.investigating || !symptom.trim()}
-            title={!state.snapshot ? 'Scan this PC first' : !category ? 'Choose an affected area first' : 'Investigate'}
+            disabled={!available || !symptom.trim()}
+            title={!state.snapshot ? 'Scan this PC first' : 'Investigate'}
           >
             {busy.investigating ? 'Investigating…' : 'Investigate'}
           </Button>
@@ -139,4 +175,8 @@ export function SymptomForm({ state, busy, app, onInvestigate, onNavigate }: Pro
       </div>
     </form>
   );
+}
+
+export function symptomCategoryFromEvidence(category: string, area?: 'windows' | 'app'): SymptomCategory | undefined {
+  return categoryFromEvidence(category, area);
 }

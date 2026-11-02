@@ -1,6 +1,6 @@
 {
   "name": "pocketbench",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Windows and application repair powered by Meta Muse Spark",
   "private": true,
   "type": "module",

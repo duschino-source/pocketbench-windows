@@ -7,7 +7,7 @@ import {
   OpenRegular,
 } from '@fluentui/react-icons';
 import { formatUSD, isHttpsUrl, updateStatusLabel } from '../format';
-import type { ViewProps } from '../types';
+import { isBusy, type ViewProps } from '../types';
 
 function realPercent(value: number | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) return null;
@@ -17,7 +17,7 @@ function realPercent(value: number | undefined): number | null {
 export function SettingsView(props: ViewProps): React.ReactElement {
   const { state, busy, updates } = props;
   const [keyInput, setKeyInput] = React.useState('');
-  const showKey = keyInput.length > 0;
+  const active = isBusy(busy);
   const budget = state.budget;
   const settings = state.settings;
 
@@ -29,6 +29,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
   const updating = updates.action !== null;
   const downloading = update?.status === 'downloading';
   const installReady = update?.status === 'downloaded';
+  const manualGate = Boolean(update && (!update.supported || !update.trustedPublisher));
   const statusLabel = update
     ? updateStatusLabel(update.status)
     : updates.canRefresh || updates.canCheck
@@ -43,10 +44,10 @@ export function SettingsView(props: ViewProps): React.ReactElement {
 
   return (
     <div>
-      <section className="pb-section" aria-labelledby="settings-key">
+      <section className="pb-section" aria-labelledby="settings-connection">
         <div className="pb-section-head">
-          <h2 className="pb-section-title" id="settings-key">
-            Model API key
+          <h2 className="pb-section-title" id="settings-connection">
+            Research connection
           </h2>
           <div className="pb-section-action">
             <Badge appearance="tint" color="subtle">
@@ -55,22 +56,21 @@ export function SettingsView(props: ViewProps): React.ReactElement {
           </div>
         </div>
         <p className="pb-note">
-          Research calls the model only with a key you supply here. The stored key itself is never displayed; only
-          whether a key is saved. Research is metered: estimates are under Advanced settings, and actual charges
-          appear in your Meta billing account.
+          A model key enables deeper research. Without a key, scans and local checks still work offline. The stored key
+          is never displayed; only whether one is saved.
         </p>
         <form
           className="pb-form"
           onSubmit={(event) => {
             event.preventDefault();
             const trimmed = keyInput.trim();
-            if (trimmed.length === 0) return;
+            if (trimmed.length === 0 || active) return;
             setKeyInput('');
             void props.onSaveKey(trimmed);
           }}
         >
           <label className="pb-note" htmlFor="settings-api-key">
-            New API key
+            {settings.hasApiKey ? 'Replace saved API key' : 'New API key'}
           </label>
           <Input
             id="settings-api-key"
@@ -78,13 +78,17 @@ export function SettingsView(props: ViewProps): React.ReactElement {
             autoComplete="off"
             value={keyInput}
             onChange={(_, data) => setKeyInput(data.value)}
-            placeholder="Paste a new key to save it"
+            placeholder={settings.hasApiKey ? 'Paste a replacement key' : 'Paste a new key to save it'}
+            disabled={active}
           />
+          <p className="pb-note">
+            The key is encrypted with Windows credential protection and stays on this computer.
+          </p>
           <div className="pb-form-row">
             <Button
               type="submit"
               appearance="primary"
-              disabled={busy.savingKey || keyInput.trim().length === 0}
+              disabled={active || keyInput.trim().length === 0}
             >
               {busy.savingKey ? 'Saving…' : 'Save key'}
             </Button>
@@ -92,7 +96,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
               <Button
                 appearance="secondary"
                 icon={<DismissRegular />}
-                disabled={busy.clearingKey}
+                disabled={active}
                 onClick={() => {
                   void props.onClearKey();
                 }}
@@ -101,11 +105,6 @@ export function SettingsView(props: ViewProps): React.ReactElement {
               </Button>
             )}
           </div>
-          {showKey && (
-            <p className="pb-note">
-              Your saved key is encrypted with Windows credential protection and stays on this computer.
-            </p>
-          )}
         </form>
       </section>
 
@@ -123,8 +122,8 @@ export function SettingsView(props: ViewProps): React.ReactElement {
 
         {!updatesAvailable ? (
           <p className="pb-note">
-            This build does not expose update controls. Download the latest published release directly if you need to
-            update manually.
+            This build does not expose update controls. Download the latest published release manually; PocketBench
+            cannot install it for you.
           </p>
         ) : (
           <>
@@ -157,10 +156,10 @@ export function SettingsView(props: ViewProps): React.ReactElement {
                     appearance="secondary"
                     size="small"
                     icon={<ArrowClockwiseRegular />}
-                    disabled={checking || updating || downloading}
+                    disabled={checking || updating || downloading || active}
                     onClick={() => void updates.check()}
                   >
-                    {checking ? 'Checking…' : 'Check for updates'}
+                    {checking ? 'Checking…' : 'Check now'}
                   </Button>
                 )}
                 {updates.canInstall && (
@@ -168,7 +167,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
                     appearance="primary"
                     size="small"
                     icon={<ArrowDownloadRegular />}
-                    disabled={!installReady || updating}
+                    disabled={!installReady || updating || active}
                     onClick={() => void updates.install()}
                   >
                     Restart to install
@@ -192,25 +191,32 @@ export function SettingsView(props: ViewProps): React.ReactElement {
                 {updates.error}
               </p>
             )}
-            <p className="pb-note">
-              Updates are checked on request. Restart to install only when your work is saved; a restart never runs
-              repairs in the background.
-            </p>
+            {manualGate && (
+              <p className="pb-note pb-update-gate">
+                This build is unsigned or its publisher is not trusted, so it will not install updates automatically.
+                Download a release manually and verify it before running.
+              </p>
+            )}
           </>
         )}
+
+        <p className="pb-note">
+          Installed, supported builds check for updates automatically at startup. Unsigned builds require a manual
+          download. A restart to install never runs repairs in the background.
+        </p>
       </section>
 
       <section className="pb-section pb-advanced" aria-label="Advanced settings">
         <details className="pb-advanced-disclosure">
           <summary>
-            <span className="pb-advanced-title">Advanced settings</span>
+            <span className="pb-advanced-title">Advanced</span>
             <span className="pb-advanced-hint">Budget estimates, model, local data</span>
           </summary>
           <div className="pb-advanced-body">
             <h3 className="pb-subsection-title">Research budget</h3>
             <p className="pb-note">
-              These are conservative estimates, including reserved requests. They are not a bill. Actual charges
-              appear in your Meta billing account.
+              Estimates include reserved requests. They are not a bill; actual charges appear in your Meta billing
+              account.
             </p>
             <div className="pb-grid" role="list" aria-label="Budget estimates">
               <div className="pb-metric" role="listitem">
@@ -232,7 +238,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
               </div>
             </div>
 
-            <h3 className="pb-subsection-title">Application details</h3>
+            <h3 className="pb-subsection-title">Local configuration</h3>
             <dl className="pb-kv">
               <dt>Model</dt>
               <dd>{settings.model}</dd>

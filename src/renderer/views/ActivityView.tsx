@@ -1,31 +1,13 @@
 import * as React from 'react';
 import { Badge, Button } from '@fluentui/react-components';
 import { ArrowUndoRegular } from '@fluentui/react-icons';
-import { formatDateTime, runStatusLabel } from '../format';
-import { findPlan, latestRunForPlan, type ViewProps } from '../types';
-import { PlanDetail } from '../components/PlanDetail';
-
-function statusColor(
-  status: 'running' | 'fixed' | 'failed' | 'pending-verification' | 'undone',
-): 'informative' | 'success' | 'danger' | 'warning' | 'subtle' {
-  switch (status) {
-    case 'running':
-      return 'informative';
-    case 'fixed':
-      return 'success';
-    case 'failed':
-      return 'danger';
-    case 'pending-verification':
-      return 'warning';
-    case 'undone':
-      return 'subtle';
-  }
-}
+import { formatDateTime, planStatusLabel, runStatusLabel } from '../format';
+import { isBusy, type ViewProps } from '../types';
 
 export function ActivityView(props: ViewProps): React.ReactElement {
-  const { state, busy, selectedPlanId } = props;
+  const { state, busy } = props;
   const history = state.history;
-  const selectedPlan = findPlan(state, selectedPlanId);
+  const active = isBusy(busy);
 
   return (
     <div>
@@ -37,7 +19,7 @@ export function ActivityView(props: ViewProps): React.ReactElement {
         </div>
 
         {history.length === 0 ? (
-          <div className="pb-empty">
+          <div className="pb-empty pb-empty-compact">
             <h3>No operations yet</h3>
             <p>
               Applied repairs, verification results, and undo actions appear here. PocketBench records only real
@@ -77,16 +59,16 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                       </div>
                     )}
                   </div>
-                  <div className="pb-row-side">
-                    <Badge appearance="tint" color="subtle">
-                      {runStatusLabel(run.status)}
+                  <div className="pb-row-side pb-activity-side">
+                    <Badge appearance="outline" color="subtle" className="pb-neutral-status">
+                      Status: {runStatusLabel(run.status)}
                     </Badge>
                     {run.canUndo ? (
                       <Button
                         appearance="secondary"
                         size="small"
                         icon={<ArrowUndoRegular />}
-                        disabled={undoing || busy.undoingRunId !== null}
+                        disabled={active}
                         onClick={() => {
                           void props.onUndo(run.id);
                         }}
@@ -95,7 +77,11 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                         {undoing ? 'Undoing…' : 'Undo'}
                       </Button>
                     ) : (
-                      <Badge appearance="outline" color="subtle" title="Only supported reversible operations can be undone">
+                      <Badge
+                        appearance="outline"
+                        color="subtle"
+                        title="Only supported reversible operations can be undone"
+                      >
                         Undo unavailable
                       </Badge>
                     )}
@@ -107,43 +93,35 @@ export function ActivityView(props: ViewProps): React.ReactElement {
         )}
       </section>
 
-      {selectedPlan ? (
-        <PlanDetail
-          plan={selectedPlan}
-          busy={busy}
-          latestRun={latestRunForPlan(state, selectedPlan.id)}
-          onApply={props.onApply}
-          onOpenExternal={props.onOpenExternal}
-        />
-      ) : (
-        state.plans.length > 0 && (
-          <section className="pb-section" aria-labelledby="activity-plans">
-            <div className="pb-section-head">
-              <h2 className="pb-section-title" id="activity-plans">
-                Repair plans
-              </h2>
-            </div>
-            <ul className="pb-list">
-              {state.plans
-                .slice()
-                .map((plan) => (
-                  <li key={plan.id} className="pb-row">
-                    <div className="pb-row-main">
-                      <div className="pb-row-title">{plan.title}</div>
-                      <div className="pb-row-sub">
-                        {plan.target.name} · {plan.status}
-                      </div>
-                    </div>
-                    <div className="pb-row-side">
-                      <Button appearance="secondary" size="small" onClick={() => props.onSelectPlan(plan.id)}>
-                        Open plan
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-            </ul>
-          </section>
-        )
+      {state.plans.length > 0 && (
+        <section className="pb-section" aria-labelledby="activity-plans">
+          <div className="pb-section-head">
+            <h2 className="pb-section-title" id="activity-plans">
+              Repair plans
+            </h2>
+          </div>
+          <ul className="pb-list">
+            {state.plans.map((plan) => (
+              <li key={plan.id} className="pb-row">
+                <div className="pb-row-main">
+                  <div className="pb-row-title">{plan.title}</div>
+                  <div className="pb-row-sub">
+                    {plan.target.name}
+                    {plan.status !== 'ready' && plan.reason ? ` · ${plan.reason}` : ''}
+                  </div>
+                </div>
+                <div className="pb-row-side pb-activity-side">
+                  <Badge appearance="outline" color="subtle" className="pb-neutral-status">
+                    Status: {planStatusLabel(plan.status)}
+                  </Badge>
+                  <Button appearance="secondary" size="small" onClick={() => props.onSelectPlan(plan.id)}>
+                    Open plan
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );

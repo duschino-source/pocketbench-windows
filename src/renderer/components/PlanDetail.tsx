@@ -4,11 +4,13 @@ import { OpenRegular, WrenchRegular } from '@fluentui/react-icons';
 import type { RepairPlan, RepairRun } from '../../shared/contracts';
 import { formatDateTime, isHttpsUrl, planStatusLabel, runStatusLabel } from '../format';
 import type { BusyState } from '../types';
+import { isBusy } from '../types';
 
 export interface PlanDetailProps {
   plan: RepairPlan;
   busy: BusyState;
   latestRun?: RepairRun;
+  headingRef?: React.Ref<HTMLHeadingElement>;
   onApply: (planId: string) => Promise<void>;
   onOpenExternal: (url: string) => Promise<void>;
 }
@@ -25,24 +27,31 @@ export function PlanDetail({
   plan,
   busy,
   latestRun,
+  headingRef,
   onApply,
   onOpenExternal,
 }: PlanDetailProps): React.ReactElement {
   const applying = busy.applyingPlanId === plan.id;
-  const localChecks = plan.evidence.filter(
-    (item) => item.context?.source === 'local-read-only-tool' && item.context?.tool,
-  );
+  const blockers = [
+    busy.applyingPlanId && busy.applyingPlanId !== plan.id ? 'another repair is applying' : null,
+    busy.scan ? 'a scan is running' : null,
+    busy.investigating ? 'research is running' : null,
+    busy.cancelling ? 'cancellation is running' : null,
+    busy.undoingRunId ? 'an undo is running' : null,
+    busy.savingKey || busy.clearingKey ? 'key settings are saving' : null,
+  ].filter((value): value is string => value !== null);
+  // Backend guard: only a stored, reviewed Ready plan may apply. Never relax this in UI.
+  // Apply stays disabled while the SAME plan is applying; ready/approved plans
+  // with steps and no run keep their existing eligibility otherwise.
   const canApply =
     plan.status === 'ready' &&
-    !busy.applyingPlanId &&
-    !busy.scan &&
-    !busy.investigating &&
-    !busy.cancelling &&
-    !busy.undoingRunId &&
-    !busy.savingKey &&
-    !busy.clearingKey &&
-    !latestRun;
+    plan.review.approved &&
+    plan.steps.length > 0 &&
+    blockers.length === 0 &&
+    !latestRun &&
+    !isBusy(busy);
   const irreversible = plan.steps.filter((step) => !step.reversible);
+  const adminCount = plan.steps.filter((step) => step.requiresAdmin).length;
   const expected = plan.steps.map((step) => step.verification).filter((value) => value.trim().length > 0);
 
   const applyNote = latestRun
@@ -60,7 +69,7 @@ export function PlanDetail({
       <div className="pb-plan-heading">
         <div>
           <div className="pb-eyebrow">REPAIR REVIEW</div>
-          <h2>{plan.title}</h2>
+          <h2 ref={headingRef} tabIndex={-1}>{plan.title}</h2>
           <p>
             {plan.target.name} · {formatDateTime(plan.createdAt)}
           </p>
@@ -78,117 +87,87 @@ export function PlanDetail({
 
       <div className="pb-plan-columns">
         <div className="pb-plan-main">
-          <div className="pb-plan-summary" aria-label="Repair summary">
-            <div className="pb-plan-summary-block">
-              <h3>Problem</h3>
-              <p>{plan.summary}</p>
-            </div>
-            <div className="pb-plan-summary-block">
-              <h3>Proposed change</h3>
-              {plan.steps.length > 0 ? (
-                <ul className="pb-plan-summary-list">
-                  {plan.steps.map((step) => (
-                    <li key={step.id}>{step.title}</li>
+          <section className="pb-plan-block" aria-labelledby={'problem-' + plan.id}>
+            <h3 id={'problem-' + plan.id}>Problem</h3>
+            <p className="pb-plan-lede">{plan.summary}</p>
+            <details className="pb-technical">
+              <summary>Diagnostic evidence ({plan.evidence.length})</summary>
+              {plan.evidence.length === 0 ? (
+                <p className="pb-note">No linked scan evidence. This investigation used the reported symptom.</p>
+              ) : (
+                <ul className="pb-detail-list">
+                  {plan.evidence.map((item) => (
+                    <li key={item.id}>
+                      <strong>{item.title}.</strong> {item.observed}
+                      {item.details.length > 0 && (
+                        <details className="pb-technical">
+                          <summary>Evidence details</summary>
+                          <ul className="pb-detail-list">
+                            {item.details.map((detail, index) => (
+                              <li key={index}>{detail}</li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </li>
                   ))}
                 </ul>
-              ) : (
-                <p>No executable repair is available for this plan.</p>
               )}
-            </div>
-            <div className="pb-plan-summary-block">
-              <h3>Expected result</h3>
-              {expected.length > 0 ? (
-                <ul className="pb-plan-summary-list">
-                  {expected.map((value, index) => (
-                    <li key={`${index}-${value}`}>{value}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p>No verified outcome is defined for this plan. Review the reason above before applying.</p>
-              )}
-            </div>
-          </div>
+            </details>
+          </section>
 
-          <h3>Effects and disruptions</h3>
-          {plan.steps.length === 0 ? (
-            <p className="pb-note">No Windows or application setting will be changed by this plan.</p>
-          ) : (
-            <ul className="pb-list pb-effects">
-              {plan.steps.map((step) => (
-                <li className="pb-effect-row" key={step.id}>
-                  <div className="pb-row-title">{step.title}</div>
-                  <p className="pb-row-sub">{step.impact}</p>
-                  <div className="pb-step-flags">
-                    <Badge appearance="outline" color="subtle">
-                      {step.reversible ? 'Backup & undo supported' : 'Cannot be undone'}
-                    </Badge>
-                    <Badge appearance="outline" color="subtle">
-                      {step.requiresAdmin ? 'Windows admin approval' : 'Current user'}
-                    </Badge>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {irreversible.length > 0 && (
-            <div className="pb-plan-warning" role="note">
-              <strong>Irreversible effect.</strong> {irreversible.map((step) => step.title).join(', ')} cannot be undone
-              after the repair is applied.
-            </div>
-          )}
-
-          <h3>Step details</h3>
-          {plan.steps.length === 0 ? (
-            <p className="pb-note">No steps were produced. The reason above explains what is missing.</p>
-          ) : (
-            <ol className="pb-list">
-              {plan.steps.map((step, index) => (
-                <li key={step.id} className="pb-plan-step">
-                  <div className="pb-row-title">
-                    <span className="pb-step-number">{String(index + 1).padStart(2, '0')}</span>
-                    {step.title}
-                  </div>
-                  <details className="pb-technical">
-                    <summary>Verification & technical details</summary>
-                    <p>{step.verification}</p>
-                    <code>
-                      {step.operation} · {step.targetId}
-                    </code>
-                  </details>
-                </li>
-              ))}
-            </ol>
-          )}
-
-          <details className="pb-technical">
-            <summary>Diagnostic evidence ({plan.evidence.length})</summary>
-            {localChecks.length > 0 && (
-              <p className="pb-note">
-                Includes {localChecks.length} read-only local diagnostic{' '}
-                {localChecks.length === 1 ? 'check' : 'checks'} collected before research.
-              </p>
-            )}
-            {plan.evidence.length === 0 ? (
-              <p>No linked scan evidence. This investigation used the reported symptom.</p>
+          <section className="pb-plan-block" aria-labelledby={'change-' + plan.id}>
+            <h3 id={'change-' + plan.id}>Change</h3>
+            {plan.steps.length === 0 ? (
+              <p className="pb-note">No executable repair is available for this plan.</p>
             ) : (
-              <ul className="pb-list">
-                {plan.evidence.map((item) => (
-                  <li className="pb-row" key={item.id}>
-                    <div className="pb-row-main">
-                      <div className="pb-row-title">{item.title}</div>
-                      <div className="pb-row-sub">{item.observed}</div>
-                      <ul className="pb-detail-list">
-                        {item.details.map((detail, detailIndex) => (
-                          <li key={detailIndex}>{detail}</li>
-                        ))}
-                      </ul>
+              <ol className="pb-plan-steps">
+                {plan.steps.map((step, index) => (
+                  <li key={step.id} className="pb-plan-step">
+                    <div className="pb-row-title">
+                      <span className="pb-step-number">{String(index + 1).padStart(2, '0')}</span>
+                      {step.title}
                     </div>
+                    <p className="pb-row-sub">{step.impact}</p>
+                    <div className="pb-step-flags">
+                      <Badge appearance="outline" color="subtle">
+                        {step.reversible ? 'Backup & undo supported' : 'Cannot be undone'}
+                      </Badge>
+                      <Badge appearance="outline" color="subtle">
+                        {step.requiresAdmin ? 'Windows admin approval' : 'Current user'}
+                      </Badge>
+                    </div>
+                    <details className="pb-technical">
+                      <summary>Verification & technical details</summary>
+                      <p>{step.verification}</p>
+                      <code>
+                        {step.operation} · {step.targetId}
+                      </code>
+                    </details>
                   </li>
                 ))}
-              </ul>
+              </ol>
             )}
-          </details>
+            {irreversible.length > 0 && (
+              <div className="pb-plan-warning" role="note">
+                <strong>Irreversible effect.</strong> {irreversible.map((step) => step.title).join(', ')} cannot be undone
+                after the repair is applied.
+              </div>
+            )}
+          </section>
+
+          <section className="pb-plan-block" aria-labelledby={'result-' + plan.id}>
+            <h3 id={'result-' + plan.id}>Expected result</h3>
+            {expected.length > 0 ? (
+              <ul className="pb-plan-summary-list">
+                {expected.map((value, index) => (
+                  <li key={`${index}-${value}`}>{value}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="pb-note">No verified outcome is defined for this plan. Review the reason above before applying.</p>
+            )}
+          </section>
         </div>
 
         <aside className="pb-plan-sources">
@@ -214,6 +193,8 @@ export function PlanDetail({
           </details>
 
           <h3>Research sources</h3>
+          <details className="pb-technical" open={plan.sources.some((source) => source.concerns.length > 0)}>
+            <summary>Source information ({plan.sources.length})</summary>
           {plan.sources.length === 0 ? (
             <p className="pb-note">No usable sources were recorded.</p>
           ) : (
@@ -245,7 +226,7 @@ export function PlanDetail({
                   </ul>
                 )}
                 <details className="pb-technical">
-                  <summary>Citation details</summary>
+                  <summary>Source details</summary>
                   <p>Supports: {source.supports || 'No executable operation'}</p>
                   <p>{source.applicable ? 'Applicable to this plan.' : 'Not applicable to this plan.'}</p>
                   {source.corroboratedBy.length > 0 && (
@@ -255,15 +236,32 @@ export function PlanDetail({
               </div>
             ))
           )}
+          </details>
         </aside>
       </div>
 
       <div className="pb-apply-bar">
-        <p className="pb-note">{applyNote}</p>
+        <div className="pb-apply-copy">
+          <p className="pb-note">{applyNote}{blockers.length > 0 ? ` Waiting: ${blockers.join(', ')}.` : ''}</p>
+          {plan.steps.length > 0 && (
+            <p className="pb-apply-facts">
+              {plan.steps.length} step{plan.steps.length === 1 ? '' : 's'}
+              {' · '}
+              {irreversible.length > 0
+                ? `${irreversible.length} cannot be undone`
+                : 'Reversible where supported'}
+              {' · '}
+              {adminCount > 0
+                ? `${adminCount} need${adminCount === 1 ? 's' : ''} Windows admin approval`
+                : 'No admin approval needed'}
+            </p>
+          )}
+        </div>
         <Button
           appearance="primary"
           icon={<WrenchRegular />}
           disabled={!canApply}
+          title={!canApply && blockers.length === 0 ? applyNote : undefined}
           onClick={() => void onApply(plan.id)}
         >
           {applying ? 'Applying…' : 'Apply fix'}
