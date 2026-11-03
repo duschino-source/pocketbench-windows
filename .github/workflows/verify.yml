@@ -6,6 +6,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
@@ -19,11 +21,20 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
+      - name: Rust engine parity tests
+        run: npm run test:rust
+      - name: Build Rust engine addon
+        run: npm run build:native
       - run: node --test tools/gateway.test.mjs
       - run: npm run check
       - name: True-black UI, contrast, icons, and reduced motion
         run: node tools/check-ui.cjs
+      - name: Unit coverage thresholds
+        run: npm run test:coverage
+      - name: Electron end-to-end (palette and navigation)
+        run: npm run test:e2e
       - name: Native repairs in disposable Windows runner
         run: npm run test:native
         env:

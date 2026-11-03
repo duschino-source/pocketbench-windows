@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { Button } from '@fluentui/react-components';
+import { Button, SearchBox } from '@fluentui/react-components';
+import { searchFindings } from '../search';
 import { CheckmarkCircleRegular, DesktopPulseRegular, SearchRegular, WarningRegular } from '@fluentui/react-icons';
 import type { DiagnosticEvidence } from '../../shared/contracts';
 import { isBusy, type ViewProps } from '../types';
@@ -49,11 +50,32 @@ function symptomCategoryOf(item: DiagnosticEvidence): ReturnType<typeof symptomC
   return symptomCategoryFromEvidence(item.category, item.area);
 }
 
+function readStoredFindingsQuery(): string {
+  try {
+    if (typeof sessionStorage === 'undefined') return '';
+    const value = sessionStorage.getItem('pocketbench:findings-query') ?? '';
+    sessionStorage.removeItem('pocketbench:findings-query');
+    return value;
+  } catch {
+    return '';
+  }
+}
+
 export function WindowsView(props: ViewProps): React.ReactElement {
   const { state, busy } = props;
   const active = isBusy(busy);
   const diagnostics = state.snapshot?.diagnostics ?? [];
   const [category, setCategory] = React.useState<Category>('all');
+  const [query, setQuery] = React.useState(readStoredFindingsQuery);
+
+  React.useEffect(() => {
+    const onSearchFindings = (event: Event) => {
+      const value = (event as CustomEvent<string>).detail;
+      if (typeof value === 'string') setQuery(value);
+    };
+    window.addEventListener('pocketbench:search-findings', onSearchFindings);
+    return () => window.removeEventListener('pocketbench:search-findings', onSearchFindings);
+  }, []);
 
   const counts = React.useMemo(() => {
     const result: Record<string, number> = { all: diagnostics.length };
@@ -64,13 +86,15 @@ export function WindowsView(props: ViewProps): React.ReactElement {
     return result;
   }, [diagnostics]);
 
-  const visible = React.useMemo(
-    () =>
-      diagnostics
-        .filter((item) => category === 'all' || categoryOf(item) === category)
-        .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]),
-    [category, diagnostics],
-  );
+  const visible = React.useMemo(() => {
+    const inCategory = diagnostics.filter(
+      (item) => category === 'all' || categoryOf(item) === category,
+    );
+    // With a query, relevance ranks results; without one, urgency does.
+    return query.trim()
+      ? searchFindings(inCategory, query)
+      : inCategory.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+  }, [category, diagnostics, query]);
 
   const categoryLabel = CATEGORY_LABELS[category];
 
@@ -97,6 +121,20 @@ export function WindowsView(props: ViewProps): React.ReactElement {
           </div>
         ) : (
           <>
+            <div className="pb-findings-search">
+              <SearchBox
+                placeholder="Search findings…"
+                aria-label="Search diagnostic findings"
+                value={query}
+                onChange={(_, data) => setQuery(data.value ?? '')}
+              />
+              {query.trim() && (
+                <span className="pb-note" role="status">
+                  {visible.length} match{visible.length === 1 ? '' : 'es'}
+                </span>
+              )}
+            </div>
+
             <div className="pb-category-bar" role="group" aria-label="Filter diagnostic findings by category">
               {CATEGORIES.map((key) => (
                 <Button
@@ -119,16 +157,25 @@ export function WindowsView(props: ViewProps): React.ReactElement {
               <div className="pb-empty pb-empty-compact">
                 <CheckmarkCircleRegular />
                 <h3>
-                  {diagnostics.length
-                    ? `No findings in ${categoryLabel.toLowerCase()}`
-                    : 'No findings in this scan'}
+                  {query.trim()
+                    ? 'No findings match your search'
+                    : diagnostics.length
+                      ? `No findings in ${categoryLabel.toLowerCase()}`
+                      : 'No findings in this scan'}
                 </h3>
                 <p>
-                  {diagnostics.length
-                    ? 'Try another category. A clean scan only means no known issue was detected.'
-                    : 'Scan again after making changes, or describe a problem the scan did not detect.'}
+                  {query.trim()
+                    ? 'Try different words, or clear the search to see every finding in this category.'
+                    : diagnostics.length
+                      ? 'Try another category. A clean scan only means no known issue was detected.'
+                      : 'Scan again after making changes, or describe a problem the scan did not detect.'}
                 </p>
                 <div className="pb-empty-actions">
+                  {query.trim() && (
+                    <Button appearance="secondary" size="small" disabled={active} onClick={() => setQuery('')}>
+                      Clear search
+                    </Button>
+                  )}
                   {category !== 'all' && (
                     <Button appearance="secondary" size="small" disabled={active} onClick={() => setCategory('all')}>
                       Show all findings

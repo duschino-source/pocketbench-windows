@@ -16,6 +16,10 @@
   --pb-danger: var(--pb-text);
   --pb-info: var(--pb-text);
   --pb-radius: 8px;
+  --pb-duration-fast: 120ms;
+  --pb-duration: 180ms;
+  --pb-duration-slow: 240ms;
+  --pb-ease-out: ease-out;
 }
 * { box-sizing: border-box; }
 html { font-size: 16px; }
@@ -323,12 +327,12 @@ code, .pb-mono { font-family: "Consolas", monospace; font-size: .875rem; overflo
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.pb-page-view { animation: pb-page-enter 180ms ease-out both; }
+.pb-page-view { animation: pb-page-enter var(--pb-duration) var(--pb-ease-out) both; }
 
-.pb-plan-panel { animation: pb-panel-enter 200ms ease-out both; }
-.pb-notice, .pb-progress { animation: pb-feedback-enter 160ms ease-out both; }
+.pb-plan-panel { animation: pb-panel-enter var(--pb-duration-slow) var(--pb-ease-out) both; }
+.pb-notice, .pb-progress { animation: pb-feedback-enter var(--pb-duration) var(--pb-ease-out) both; }
 
-.pb-app .fui-Button { transition: transform 120ms ease-out, opacity 120ms ease-out; }
+.pb-app .fui-Button { transition: transform var(--pb-duration-fast) var(--pb-ease-out), opacity var(--pb-duration-fast) var(--pb-ease-out); }
 .pb-app .fui-Button:not(:disabled):active { transform: scale(.98); }
 
 .pb-app-entry:active { transform: scale(.98); }
@@ -553,3 +557,22 @@ code, .pb-mono { font-family: "Consolas", monospace; font-size: .875rem; overflo
     margin-top: 8px;
   }
 }
+
+/* Search, palette, and content motion. Transform/opacity only; the global
+   reduced-motion rule above disables every rule in this section. */
+.pb-findings-search { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.pb-findings-search .fui-SearchBox { flex: 1; max-width: 520px; background: #000000; border-color: var(--pb-border-strong); border-radius: 8px; }
+.pb-match { background: #22385c; color: inherit; padding: 0 1px; border-radius: 2px; }
+.pb-inspector-content { animation: pb-panel-enter var(--pb-duration-slow) var(--pb-ease-out) both; }
+.pb-plan-result { animation: pb-feedback-enter var(--pb-duration) var(--pb-ease-out) both; }
+.pb-palette-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; justify-content: center; align-items: flex-start; padding: 12vh 24px 24px; background: rgba(0, 0, 0, .62); animation: pb-feedback-enter var(--pb-duration-fast) var(--pb-ease-out) both; }
+.pb-palette { width: min(640px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--pb-panel); border: 1px solid var(--pb-border-strong); border-radius: 12px; animation: pb-panel-enter var(--pb-duration) var(--pb-ease-out) both; }
+.pb-palette .fui-SearchBox { background: #000000; border-color: var(--pb-border-strong); border-radius: 8px; }
+.pb-palette-list { display: flex; flex-direction: column; max-height: 50vh; overflow: auto; }
+.pb-palette-item { display: flex; align-items: baseline; gap: 12px; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--pb-text); text-align: left; transition: background-color var(--pb-duration-fast) var(--pb-ease-out); }
+.pb-palette-item[aria-selected="true"] { background: #181818; }
+.pb-palette-kind { flex: 0 0 64px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: var(--pb-text-faint); }
+.pb-palette-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.pb-palette-hint { flex: 0 0 auto; font-size: 12px; color: var(--pb-text-faint); }
+.pb-palette-empty { margin: 0; padding: 16px 12px; font-size: 14px; color: var(--pb-text-secondary); }
+.pb-palette-foot { display: flex; gap: 16px; padding: 0 4px; font-size: 11px; color: var(--pb-text-faint); }

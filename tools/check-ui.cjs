@@ -8,7 +8,7 @@ if(!process.versions.electron){
 const {app,BrowserWindow,ipcMain}=require('electron');
 process.chdir(root);fs.mkdirSync('.local',{recursive:true});
 app.setPath('userData',path.join(process.cwd(),'.local','ui-qa-profile'));
-const state={snapshot:{scannedAt:new Date().toISOString(),platform:'win32',machine:{name:'QA fixture',os:'Windows 11',memoryTotal:16*1024**3,memoryFree:8*1024**3,uptime:3600,cpuCount:8},metrics:{diskFree:100*1024**3,diskTotal:500*1024**3,cpuPercent:12},diagnostics:[],apps:[{id:'qa-firefox',name:'Mozilla Firefox',version:'159.0',publisher:'Mozilla',family:'firefox',capabilities:['app.patchConfig','app.restart']},{id:'qa-obsidian',name:'Obsidian',version:'1.0',publisher:'Obsidian',family:'obsidian',capabilities:[]}],startup:[],services:[],labMode:true},plans:[],history:[],settings:{hasApiKey:false,budgetLimit:90,model:'muse-spark-1.3',labMode:true,dataDirectory:'Isolated UI QA fixture'},budget:{limit:90,spent:0,reserved:0,remaining:90,requests:0}};
+const state={snapshot:{scannedAt:new Date().toISOString(),platform:'win32',machine:{name:'QA fixture',os:'Windows 11',memoryTotal:16*1024**3,memoryFree:8*1024**3,uptime:3600,cpuCount:8},metrics:{diskFree:100*1024**3,diskTotal:500*1024**3,cpuPercent:12},diagnostics:[{id:'qa-dns',area:'windows',category:'network',title:'DNS cache stale',severity:'warning',observed:'Resolver cache holds old records',details:['Cached records predate the last network change.']}],apps:[{id:'qa-firefox',name:'Mozilla Firefox',version:'159.0',publisher:'Mozilla',family:'firefox',capabilities:['app.patchConfig','app.restart']},{id:'qa-obsidian',name:'Obsidian',version:'1.0',publisher:'Obsidian',family:'obsidian',capabilities:[]}],startup:[],services:[],labMode:true},plans:[],history:[],settings:{hasApiKey:false,budgetLimit:90,model:'muse-spark-1.3',labMode:true,dataDirectory:'Isolated UI QA fixture'},budget:{limit:90,spent:0,reserved:0,remaining:90,requests:0}};
 ipcMain.handle('pocketbench:state',()=>state);
 ipcMain.handle('pocketbench:update-state',()=>({status:'manual',supported:false,trustedPublisher:false,message:'Isolated UI check'}));
 const fixtureIcon='data:image/png;base64,'+fs.readFileSync('resources/icon.png').toString('base64');
@@ -45,6 +45,25 @@ app.whenReady().then(async()=>{
    results.appSelection=await check("({heading:document.querySelector('.pb-inspector-heading h2').textContent,animation:getComputedStyle(document.querySelector('.pb-inspector-content')).animationName,iconsLoaded:document.querySelectorAll('.pb-program-icon img').length})");
   }
  }
+ // Global palette: Ctrl+K, ranked results, Enter focuses the app inspector.
+ await check("document.querySelector('button[aria-label=\"Overview\"]').click()");
+ await check("window.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}))");
+ await until("Boolean(document.querySelector('.pb-palette'))",'palette open');
+ results.paletteAnimation=await check("getComputedStyle(document.querySelector('.pb-palette')).animationName");
+ if(results.paletteAnimation!=='pb-panel-enter')throw Error('Palette entry animation missing: '+results.paletteAnimation);
+ await check("document.querySelector('.pb-palette input').focus()");
+ await check("document.execCommand('insertText',false,'fire')");
+ await until("document.querySelector('.pb-palette-item')?.textContent.includes('Firefox')",'palette result');
+ await check("document.querySelector('.pb-palette input').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
+ await until("document.querySelector('.pb-inspector-heading h2')?.textContent==='Mozilla Firefox'",'palette app focus');
+ results.palette={opened:true,focusedApp:'Mozilla Firefox'};
+ // Findings search filters by text on top of the category chips.
+ await check("document.querySelector('button[aria-label=\"Windows\"]').click()");
+ await until("Boolean(document.querySelector('input[aria-label=\"Search diagnostic findings\"]'))",'findings search');
+ await check("document.querySelector('input[aria-label=\"Search diagnostic findings\"]').focus()");
+ await check("document.execCommand('insertText',false,'dns')");
+ await until("document.querySelectorAll('.pb-win-row').length===1",'findings filtered');
+ results.findingsSearch={matches:1};
  results.blackPalette=await check("({canvas:getComputedStyle(document.querySelector('.pb-app')).backgroundColor,sidebar:getComputedStyle(document.querySelector('.pb-sidebar')).backgroundColor})");
  if(results.blackPalette.canvas!=='rgb(0, 0, 0)'||results.blackPalette.sidebar!=='rgb(0, 0, 0)')throw Error('Canvas is not true black');
  if(results.appSelection.iconsLoaded!==3)throw Error('Program icon images failed to load');
@@ -52,6 +71,17 @@ app.whenReady().then(async()=>{
  await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
  results.reduced=await check("({enabled:matchMedia('(prefers-reduced-motion: reduce)').matches,name:getComputedStyle(document.querySelector('.pb-page-view')).animationName,transition:getComputedStyle(document.querySelector('.pb-nav-button')).transitionDuration})");
  if(!results.reduced.enabled||results.reduced.name!=='none'||results.reduced.transition!=='0s')throw Error('Reduced motion did not disable animation and transitions');
+ await check("document.querySelector('button[aria-label=\"Apps\"]').click()");
+ await until("Boolean(document.querySelector('.pb-app-entry'))",'reduced apps entries');
+ await check("document.querySelector('.pb-app-entry').click()");
+ await until("Boolean(document.querySelector('.pb-inspector-content'))",'reduced inspector');
+ results.reducedInspector=await check("getComputedStyle(document.querySelector('.pb-inspector-content')).animationName");
+ if(results.reducedInspector!=='none')throw Error('Reduced motion did not disable inspector animation');
+ await check("window.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}))");
+ await until("Boolean(document.querySelector('.pb-palette'))",'reduced palette open');
+ results.reducedPalette=await check("getComputedStyle(document.querySelector('.pb-palette')).animationName");
+ if(results.reducedPalette!=='none')throw Error('Reduced motion did not disable palette animation');
+ await check("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
  for(const zoom of [1,1.5,2]){
   window.webContents.setZoomFactor(zoom);await pause(100);
   results.scaling.push(await check("({zoom:"+zoom+",viewport:innerWidth,document:document.documentElement.scrollWidth,content:document.querySelector('.pb-content').clientWidth,contentScroll:document.querySelector('.pb-content').scrollWidth})"));

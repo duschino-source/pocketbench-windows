@@ -30,4 +30,6 @@ Requires Windows 11 x64 and Node.js 24. Run `npm ci`, then `npm run dev`. Config
 
 `npm run check` runs type checking, automated tests, and the production build. `npm run dist` creates a Windows installer and portable executable without publishing.
 
+The Windows engine core is migrating to Rust slice by slice (see [native engine](native/README.md)): `npm run test:rust` runs the Rust parity suite against the same golden fixtures as TypeScript, and `npm run build:native` builds the opt-in addon. `npm run test:coverage` enforces unit coverage thresholds, and `npm run test:e2e` drives the built app end-to-end (palette and navigation) in Electron.
+
 See [architecture](docs/ARCHITECTURE.md) for the diagnostic, research, and repair workflow.

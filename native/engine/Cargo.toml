@@ -1,0 +1,33 @@
+[package]
+name = "pocketbench-engine"
+version = "0.1.0"
+edition = "2021"
+description = "PocketBench Windows engine core (pure slices migrated from TypeScript)"
+license = "MIT"
+
+[lib]
+name = "pocketbench_engine"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+# Node-API surface for the Electron main process. The pure library and its
+# parity tests build without this feature and without a Node toolchain.
+napi = ["dep:napi", "dep:napi-derive", "dep:napi-build"]
+# Direct Windows reads (registry proxy state). Read-only; PowerShell in
+# resources/windows/user.ps1 remains the fallback for every caller.
+windows-reads = ["dep:windows"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+napi = { version = "2", features = ["napi8"], optional = true }
+napi-derive = { version = "2", optional = true }
+windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_System_Registry"] }
+
+[build-dependencies]
+napi-build = { version = "2", optional = true }
+
+[profile.release]
+lto = true

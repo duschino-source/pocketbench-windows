@@ -8,3 +8,7 @@ release/
 coverage/
 *.log
 *.tsbuildinfo
+native/engine/target/
+native/engine/*.node
+test-results/
+playwright-report/
