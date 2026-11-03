@@ -2,6 +2,9 @@ import { isIP } from 'node:net'
 import type { RepairPlan, RepairStep, SourceAssessment } from '../shared/contracts'
 
 export function publicSource(value: string): URL {
+  // Parsers silently repair whitespace, controls, and backslashes; reject
+  // them so a repaired URL can never differ from the reviewed URL.
+  if (/[\x00-\x20\\]/.test(value) || value.trim()!==value) throw new Error('Source must be a public HTTPS URL')
   const url=new URL(value)
   if (url.protocol!=='https:' || url.username || url.password || isIP(url.hostname) || !url.hostname.includes('.') || /(?:^|\.)(localhost|local|internal|invalid|test)$/.test(url.hostname)) throw new Error('Source must be a public HTTPS URL')
   url.hash='';return url
@@ -27,7 +30,7 @@ export function assessSources(candidates: SourceAssessment[], citations: {url:st
   return sources
 }
 function publisher(url: string): string {
-  const host=publicSource(url).hostname.toLowerCase().replace(/^www\./,'')
+  const host=publicSource(url).hostname.toLowerCase().replace(/\.$/,'').replace(/^www\./,'')
   // Conservative grouping: sibling subdomains never count as independent publishers.
   return host.split('.').slice(-2).join('.')
 }

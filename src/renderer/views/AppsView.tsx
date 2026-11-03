@@ -4,6 +4,7 @@ import { AppsRegular, ChevronRightRegular, CheckmarkCircleRegular, SearchRegular
 import type { AppTarget, OperationId } from '../../shared/contracts';
 import { isBusy, type ViewProps } from '../types';
 import { SymptomForm } from '../components/SymptomForm';
+import { searchApps } from '../search';
 import { ProgramIcon } from '../components/ProgramIcon';
 
 const OPERATION_LABELS: Partial<Record<OperationId, string>> = {
@@ -13,7 +14,6 @@ const OPERATION_LABELS: Partial<Record<OperationId, string>> = {
   'app.restart': 'App restart',
 };
 const SELECTED_APP_KEY = 'pocketbench:selected-app';
-const isIdentifier = (name: string) => /^[0-9a-f]{8}-[0-9a-f-]+$/i.test(name);
 
 function publisher(app: AppTarget): string {
   if (!app.publisher.startsWith('CN=')) return app.publisher || 'Publisher unavailable';
@@ -46,23 +46,24 @@ export function AppsView(props: ViewProps): React.ReactElement {
     }
   }, [selectedId]);
 
+  // Palette (and any future deep link) focuses an app without remounting.
+  React.useEffect(() => {
+    const onFocusApp = (event: Event) => {
+      const appId = (event as CustomEvent<string>).detail;
+      if (typeof appId === 'string' && appId) setSelectedId(appId);
+    };
+    window.addEventListener('pocketbench:focus-app', onFocusApp);
+    return () => window.removeEventListener('pocketbench:focus-app', onFocusApp);
+  }, []);
+
   // Scans can drop an app from inventory. Never keep a stale inspector target.
   React.useEffect(() => {
     if (!state.snapshot) return;
     if (selectedId && !state.snapshot.apps.some((app) => app.id === selectedId)) setSelectedId(null);
   }, [selectedId, state.snapshot]);
 
-  const filtered = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return apps
-      .filter(
-        (app) =>
-          (!repairOnly || app.capabilities.length > 0) &&
-          (!needle ||
-            [app.name, app.publisher, app.version, app.id].some((value) => value.toLowerCase().includes(needle))),
-      )
-      .sort((a, b) => Number(isIdentifier(a.name)) - Number(isIdentifier(b.name)) || a.name.localeCompare(b.name));
-  }, [apps, query, repairOnly]);
+  const hits = React.useMemo(() => searchApps(apps, query, repairOnly), [apps, query, repairOnly]);
+  const filtered = hits.map((hit) => hit.app);
 
   const selectedApp = apps.find((app) => app.id === selectedId);
   const repairCount = apps.filter((app) => app.capabilities.length > 0).length;
@@ -84,6 +85,14 @@ export function AppsView(props: ViewProps): React.ReactElement {
               aria-label="Search installed applications"
               value={query}
               onChange={(_, data) => setQuery(data.value ?? '')}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowDown') return;
+                event.preventDefault();
+                (event.currentTarget as HTMLElement)
+                  .closest('.pb-apps-catalog')
+                  ?.querySelector<HTMLButtonElement>('.pb-app-entry')
+                  ?.focus();
+              }}
             />
             <div className="pb-app-filters" role="group" aria-label="Application filters">
               <Button size="small" appearance="subtle" aria-pressed={!repairOnly} onClick={() => setRepairOnly(false)}>
@@ -95,8 +104,22 @@ export function AppsView(props: ViewProps): React.ReactElement {
             </div>
           </div>
 
-          <ul className="pb-app-list" aria-label="Application inventory">
-            {filtered.map((app, index) => (
+          <ul
+            className="pb-app-list"
+            aria-label="Application inventory"
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return;
+              const entries = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('.pb-app-entry')];
+              const current = entries.indexOf(document.activeElement as HTMLButtonElement);
+              if (current < 0) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : current + (event.key === 'ArrowDown' ? 1 : -1);
+              entries[Math.max(0, Math.min(entries.length - 1, next))]?.focus();
+            }}
+          >
+            {hits.map((hit, index) => {
+              const app = hit.app;
+              return (
               <li key={app.id}>
                 <button
                   type="button"
@@ -106,7 +129,15 @@ export function AppsView(props: ViewProps): React.ReactElement {
                 >
                   <ProgramIcon app={app} eager={index < 12} />
                   <span className="pb-app-copy">
-                    <span className="pb-app-name">{app.name}</span>
+                    <span className="pb-app-name">
+                      {hit.nameSegments.map((segment, segmentIndex) =>
+                        segment.highlight ? (
+                          <mark className="pb-match" key={segmentIndex}>{segment.text}</mark>
+                        ) : (
+                          <span key={segmentIndex}>{segment.text}</span>
+                        ),
+                      )}
+                    </span>
                     <span className="pb-app-meta">
                       {publisher(app)}
                       {app.version ? ' · ' + app.version : ''}
@@ -124,7 +155,8 @@ export function AppsView(props: ViewProps): React.ReactElement {
                   <ChevronRightRegular className="pb-app-chevron" />
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
 
           {!filtered.length && (

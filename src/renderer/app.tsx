@@ -15,6 +15,7 @@ import {
   DismissRegular,
   HistoryRegular,
   HomeRegular,
+  SearchRegular,
   SettingsRegular,
 } from '@fluentui/react-icons';
 import type {
@@ -29,6 +30,8 @@ import { findPlan, idleBusy, isBusy, latestRunForPlan, titleFor, type NavKey } f
 import { PlanDetail } from './components/PlanDetail';
 import { StartupScreen } from './components/StartupScreen';
 import { OperationProgress } from './components/OperationProgress';
+import { CommandPalette } from './components/CommandPalette';
+import { buildPaletteItems, type PaletteItem } from './search';
 import { OverviewView } from './views/OverviewView';
 const WindowsView = React.lazy(() => import('./views/WindowsView').then((m) => ({ default: m.WindowsView })));
 const AppsView = React.lazy(() => import('./views/AppsView').then((m) => ({ default: m.AppsView })));
@@ -58,6 +61,7 @@ export default function App(): React.ReactElement {
   const [updateError, setUpdateError] = React.useState<string | null>(null);
   const [updateAction, setUpdateAction] = React.useState<'refresh' | 'check' | 'install' | null>(null);
   const [cancelPending, setCancelPending] = React.useState(false);
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
 
   const capabilities = React.useMemo(() => readApiAvailability(), []);
   const cancelRequested = React.useRef(false);
@@ -390,6 +394,51 @@ export default function App(): React.ReactElement {
     setNav(next);
     setActionError(null);
   }, []);
+  const paletteItems = React.useMemo(() => (state ? buildPaletteItems(state) : []), [state]);
+
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((value) => !value);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handlePaletteAction = React.useCallback(
+    (item: PaletteItem) => {
+      if (item.kind === 'nav') {
+        navigate(item.id.slice('nav:'.length) as NavKey);
+      } else if (item.id === 'action:scan') {
+        void handleScan();
+      } else if (item.kind === 'app') {
+        const appId = item.id.slice('app:'.length);
+        try {
+          sessionStorage.setItem('pocketbench:selected-app', appId);
+        } catch { /* selection still dispatches below */ }
+        window.dispatchEvent(new CustomEvent('pocketbench:focus-app', { detail: appId }));
+        navigate('apps');
+      } else if (item.kind === 'finding') {
+        const findingId = item.id.slice('finding:'.length);
+        const title =
+          state?.snapshot?.diagnostics.find((entry) => entry.id === findingId)?.title ?? item.title;
+        try {
+          sessionStorage.setItem('pocketbench:findings-query', title);
+        } catch { /* query still dispatches below */ }
+        window.dispatchEvent(new CustomEvent('pocketbench:search-findings', { detail: title }));
+        navigate('windows');
+      } else if (item.kind === 'plan') {
+        if (nav === 'settings') navigate('overview');
+        selectPlan(item.id.slice('plan:'.length));
+      } else if (item.kind === 'run') {
+        navigate('activity');
+      }
+    },
+    [handleScan, nav, navigate, selectPlan, state],
+  );
+
 
   React.useLayoutEffect(() => {
     const previous = previousPlanId.current;
@@ -491,6 +540,7 @@ export default function App(): React.ReactElement {
                 Lab mode
               </Badge>
             )}
+            <Button appearance="subtle" size="small" icon={<SearchRegular />} aria-label="Search (Ctrl+K)" onClick={() => setPaletteOpen(true)}>Search</Button>
             <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state.settings.hasApiKey ? 'Meta connected' : 'Meta not connected'}</Button>
             {active && (
               <span className="pb-working" aria-live="polite">
@@ -632,6 +682,13 @@ export default function App(): React.ReactElement {
             </div>
           )}
         </main>
+
+        <CommandPalette
+          open={paletteOpen}
+          items={paletteItems}
+          onClose={() => setPaletteOpen(false)}
+          onAction={handlePaletteAction}
+        />
       </div>
     </div>
   );

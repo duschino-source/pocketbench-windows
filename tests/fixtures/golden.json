@@ -1,0 +1,305 @@
+{
+  "winget": [
+    {
+      "name": "parses rows with an Available column",
+      "input": "Name                    Id                  Version   Available Source\n----------------------------------------------------------------------------------------\nMozilla Firefox         Mozilla.Firefox      128.0     129.0      winget\nObsidian                Obsidian.Obsidian    1.8.0                winget\n",
+      "sourceScope": "winget",
+      "expected": [
+        {
+          "name": "Mozilla Firefox",
+          "id": "Mozilla.Firefox",
+          "version": "128.0",
+          "source": "winget"
+        },
+        {
+          "name": "Obsidian",
+          "id": "Obsidian.Obsidian",
+          "version": "1.8.0",
+          "source": "winget"
+        }
+      ]
+    },
+    {
+      "name": "parses rows without an Available column",
+      "input": "Name                    Id                  Version   Source\n----------------------------------------------------------------------------------------\nSteam                   Valve.Steam          2.10      winget\n",
+      "sourceScope": null,
+      "expected": [
+        {
+          "name": "Steam",
+          "id": "Valve.Steam",
+          "version": "2.10",
+          "source": "winget"
+        }
+      ]
+    },
+    {
+      "name": "rejects truncated, foreign-source, and malformed rows",
+      "input": "Name                    Id                  Version   Available Source\n----------------------------------------------------------------------------------------\nVery Long Applicatio…   Mozilla.Firefox      128.0     129.0      winget\nStore App               Microsoft.Store      1.0                  msstore\nNo Dot Id               Firefox              128.0                winget\n",
+      "sourceScope": "winget",
+      "expected": []
+    },
+    {
+      "name": "strips ANSI colour codes before parsing",
+      "input": "\u001b[0mName                    Id                  Version   Source\n----------------------------------------------------------------------------------------\n\u001b[32mSteam\u001b[0m                   Valve.Steam          2.10      winget\n",
+      "sourceScope": null,
+      "expected": [
+        {
+          "name": "Steam",
+          "id": "Valve.Steam",
+          "version": "2.10",
+          "source": "winget"
+        }
+      ]
+    },
+    {
+      "name": "returns nothing without a separator line",
+      "input": "Name Id Version Source\nSteam Valve.Steam 2.10 winget\n",
+      "sourceScope": "winget",
+      "expected": []
+    }
+  ],
+  "wingetIds": [
+    {
+      "input": "Mozilla.Firefox",
+      "expected": true
+    },
+    {
+      "input": "Valve.Steam",
+      "expected": true
+    },
+    {
+      "input": "Obsidian.Obsidian",
+      "expected": true
+    },
+    {
+      "input": "Firefox",
+      "expected": false
+    },
+    {
+      "input": ".Firefox",
+      "expected": false
+    },
+    {
+      "input": "Mozilla.",
+      "expected": false
+    },
+    {
+      "input": "Mozilla Firefox",
+      "expected": false
+    },
+    {
+      "input": "",
+      "expected": false
+    }
+  ],
+  "services": [
+    {
+      "input": "Dnscache",
+      "expected": true
+    },
+    {
+      "input": "Dhcp",
+      "expected": true
+    },
+    {
+      "input": "wuauserv",
+      "expected": true
+    },
+    {
+      "input": "Winmgmt",
+      "expected": true
+    },
+    {
+      "input": "Spooler",
+      "expected": false
+    },
+    {
+      "input": "dnscache",
+      "expected": false
+    },
+    {
+      "input": "",
+      "expected": false
+    }
+  ],
+  "startupBlocked": [
+    {
+      "input": "Windows Security notification",
+      "expected": true
+    },
+    {
+      "input": "Microsoft Defender",
+      "expected": true
+    },
+    {
+      "input": "AVG Antivirus",
+      "expected": true
+    },
+    {
+      "input": "Average photo editor",
+      "expected": false
+    },
+    {
+      "input": "Steam",
+      "expected": false
+    },
+    {
+      "input": "OneDrive",
+      "expected": false
+    }
+  ],
+  "sourceKinds": [
+    {
+      "url": "https://support.microsoft.com/fix",
+      "target": "Windows",
+      "expected": "official"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/answers/questions/1",
+      "target": "Windows",
+      "expected": "community"
+    },
+    {
+      "url": "https://support.microsoft.com.evil.example/fix",
+      "target": "Windows",
+      "expected": "community"
+    },
+    {
+      "url": "https://support.mozilla.org/kb/fix",
+      "target": "Mozilla Firefox",
+      "expected": "official"
+    },
+    {
+      "url": "https://support.mozilla.org/questions/1",
+      "target": "Mozilla Firefox",
+      "expected": "community"
+    },
+    {
+      "url": "https://help.steampowered.com/fix",
+      "target": "Steam",
+      "expected": "official"
+    },
+    {
+      "url": "https://help.obsidian.md/fix",
+      "target": "Obsidian",
+      "expected": "official"
+    },
+    {
+      "url": "https://forum.obsidian.md/t/fix",
+      "target": "Obsidian",
+      "expected": "community"
+    }
+  ],
+  "sourceUrls": [
+    {
+      "input": "https://vendor.example/fix#section",
+      "expected": "https://vendor.example/fix"
+    },
+    {
+      "input": "http://vendor.example/fix",
+      "expected": "error"
+    },
+    {
+      "input": "https://127.0.0.1/x",
+      "expected": "error"
+    },
+    {
+      "input": "https://user:password@vendor.example/x",
+      "expected": "error"
+    },
+    {
+      "input": "https://localhost/x",
+      "expected": "error"
+    },
+    {
+      "input": "javascript:alert(1)",
+      "expected": "error"
+    }
+  ],
+  "gates": [
+    {
+      "name": "official source satisfies the gate",
+      "operation": "windows.clearUserProxy",
+      "sources": [
+        {
+          "url": "https://support.microsoft.com/fix",
+          "supports": "windows.clearUserProxy",
+          "corroboratedBy": []
+        }
+      ],
+      "expectedBlocked": false
+    },
+    {
+      "name": "two posts from one publisher do not corroborate",
+      "operation": "windows.clearUserProxy",
+      "sources": [
+        {
+          "url": "https://reddit.com/r/windows/a",
+          "supports": "windows.clearUserProxy",
+          "corroboratedBy": [
+            "https://old.reddit.com/r/windows/b"
+          ]
+        },
+        {
+          "url": "https://old.reddit.com/r/windows/b",
+          "supports": "windows.clearUserProxy",
+          "corroboratedBy": [
+            "https://reddit.com/r/windows/a"
+          ]
+        }
+      ],
+      "expectedBlocked": true
+    },
+    {
+      "name": "two independent publishers corroborate",
+      "operation": "windows.clearUserProxy",
+      "sources": [
+        {
+          "url": "https://reddit.com/r/windows/a",
+          "supports": "windows.clearUserProxy",
+          "corroboratedBy": [
+            "https://vendor-forum.example/fix"
+          ]
+        },
+        {
+          "url": "https://vendor-forum.example/fix",
+          "supports": "windows.clearUserProxy",
+          "corroboratedBy": [
+            "https://reddit.com/r/windows/a"
+          ]
+        }
+      ],
+      "expectedBlocked": false
+    },
+    {
+      "name": "source for a different operation does not satisfy the gate",
+      "operation": "windows.clearUserProxy",
+      "sources": [
+        {
+          "url": "https://support.microsoft.com/fix",
+          "supports": "app.repairPackage",
+          "corroboratedBy": []
+        }
+      ],
+      "expectedBlocked": true
+    }
+  ],
+  "dangerous": [
+    {
+      "title": "Disable Windows Defender",
+      "expected": "security"
+    },
+    {
+      "title": "Turn off the firewall now",
+      "expected": "security"
+    },
+    {
+      "title": "Clear the DNS cache",
+      "expected": null
+    },
+    {
+      "title": "Run diskpart to format volume C",
+      "expected": "unsupported"
+    }
+  ]
+}

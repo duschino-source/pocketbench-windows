@@ -9,6 +9,7 @@ import type { IconTarget } from './app-icons'
 import { AppRepairs } from './windows/apps'
 import { runScript, userOperation, elevatedOperation } from './windows/native'
 import { OPERATION_META, SELECTED_SERVICES, isSelectedService, SECURITY_STARTUP_PATTERN, WINGET_ID_PATTERN } from './windows/policy'
+import { activeRustEngine } from './engine-bridge'
 
 interface RawScan {
   computerName?:string;osCaption?:string;osVersion?:string;memoryTotal?:number;memoryFree?:number;uptimeSeconds?:number;cpuCount?:number;cpuPercent?:number
@@ -32,8 +33,28 @@ export function parseWingetListTable(text:string,sourceScope?:'winget'):WingetRo
   }
   return rows
 }
+/** Rust serves this slice only when opted in and validated; TS is the fallback. */
+export function parseWingetRows(text: string): WingetRow[] {
+  const rust = activeRustEngine()
+  if (rust) {
+    try {
+      return rust.parseWingetTable(text, 'winget')
+    } catch {
+      // Malformed native output never reaches inventory; fall through to TS.
+    }
+  }
+  return parseWingetListTable(text, 'winget')
+}
+/** Verification reads may use the direct Rust registry read; backup-critical
+ * reads stay on PowerShell until Rust returns full proxy fidelity
+ * (presence/kind), so undo fingerprints never lose information. */
+async function readProxyForVerify():Promise<ProxyState> {
+  const rust=activeRustEngine()
+  if(rust) { try { const direct=rust.readUserProxy(); if(direct) return proxyState({enable:direct.enable,server:direct.server}) } catch { /* Direct read is an optimisation; PowerShell remains authoritative. */ } }
+  return userOperation<ProxyState>('getProxy')
+}
 async function wingetInventory(signal?:AbortSignal):Promise<WingetRow[]> {
-  return new Promise(resolve=>execFile('winget.exe',['list','--source','winget','--disable-interactivity'],{signal,timeout:20000,maxBuffer:4*1024*1024,windowsHide:true},(error,stdout)=>resolve(error?[]:parseWingetListTable(stdout,'winget'))))
+  return new Promise(resolve=>execFile('winget.exe',['list','--source','winget','--disable-interactivity'],{signal,timeout:20000,maxBuffer:4*1024*1024,windowsHide:true},(error,stdout)=>resolve(error?[]:parseWingetRows(stdout))))
 }
 function family(name:string):AppTarget['family'] {
   if(/firefox/i.test(name) && !/thunderbird/i.test(name))return 'firefox'
@@ -177,7 +198,7 @@ export class WindowsEngine {
       if(!execution.success)return {passed:false,summary:execution.output,checks:[]}
       if(step.operation.startsWith('app.'))return await this.apps.verify(step,execution)
       if(step.operation==='windows.clearUserProxy') {
-        const after=this.labMode?this.readLab<ProxyState>('proxy',proxyState({})):await userOperation<ProxyState>('getProxy')
+        const after=this.labMode?this.readLab<ProxyState>('proxy',proxyState({})):await readProxyForVerify()
         const passed=after.enable===0 && after.server==='';return {passed,summary:passed?'Independent registry read confirms manual proxy is off.':'Proxy settings do not match the repair.',checks:[check('Manual proxy disabled',after.enable===0,execution.data.before?JSON.stringify(execution.data.before):undefined,after.enable),check('Proxy server cleared',after.server==='','configured',after.server)]}
       }
       if(step.operation==='windows.startService') {

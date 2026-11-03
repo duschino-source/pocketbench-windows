@@ -6,7 +6,9 @@
   "type": "module",
   "main": "out/main/index.js",
   "author": "PocketBench contributors",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,6 +16,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:native": "vitest run tests/windows-native.test.ts",
+    "build:native": "node tools/build-native.mjs",
+    "test:rust": "cargo test --manifest-path native/engine/Cargo.toml --features windows-reads",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
     "gateway": "node tools/budget-gateway.mjs",
     "dist": "npm run typecheck && npm run build && electron-builder --win nsis portable --publish never",
     "clean": "node -e \"for (const p of ['out','release']) require('node:fs').rmSync(p, {recursive: true, force: true})\"",
@@ -27,6 +33,7 @@
     "@fluentui/react-components": "^9.0.0",
     "@fluentui/react-icons": "^2.0.0",
     "electron-updater": "^6.8.11",
+    "fuse.js": "^7.5.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "^4.0.0"
@@ -37,9 +44,12 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "@vitest/coverage-v8": "^4.1.12",
     "electron": "^45.1.0",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
+    "fast-check": "^4.10.2",
+    "playwright": "^1.64.1",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
     "vitest": "^4.0.0"
@@ -56,11 +66,13 @@
     "files": [
       "out/**/*",
       "resources/**/*",
+      "native/engine/*.node",
       "package.json",
       "!**/*.map"
     ],
     "asarUnpack": [
-      "resources/**/*"
+      "resources/**/*",
+      "native/engine/*.node"
     ],
     "win": {
       "icon": "resources/icon.ico",
