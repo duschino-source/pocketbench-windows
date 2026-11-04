@@ -5,6 +5,7 @@ import type { RepairPlan, RepairRun } from '../../shared/contracts';
 import { formatDateTime, isHttpsUrl, planStatusLabel, runStatusLabel } from '../format';
 import type { BusyState } from '../types';
 import { isBusy } from '../types';
+import { VerificationChecks } from './VerificationChecks';
 
 export interface PlanDetailProps {
   plan: RepairPlan;
@@ -74,8 +75,8 @@ export function PlanDetail({
             {plan.target.name} · {formatDateTime(plan.createdAt)}
           </p>
         </div>
-        <Badge appearance="tint" color="subtle">
-          {planStatusLabel(plan.status)}
+        <Badge appearance="outline" color="subtle" className="pb-status" data-status={latestRun?.status ?? plan.status}>
+          {latestRun ? runStatusLabel(latestRun.status) : planStatusLabel(plan.status)}
         </Badge>
       </div>
 
@@ -88,7 +89,7 @@ export function PlanDetail({
       <div className="pb-plan-columns">
         <div className="pb-plan-main">
           <section className="pb-plan-block" aria-labelledby={'problem-' + plan.id}>
-            <h3 id={'problem-' + plan.id}>Problem</h3>
+            <h3 id={'problem-' + plan.id}>What we found</h3>
             <p className="pb-plan-lede">{plan.summary}</p>
             <details className="pb-technical">
               <summary>Diagnostic evidence ({plan.evidence.length})</summary>
@@ -117,7 +118,7 @@ export function PlanDetail({
           </section>
 
           <section className="pb-plan-block" aria-labelledby={'change-' + plan.id}>
-            <h3 id={'change-' + plan.id}>Change</h3>
+            <h3 id={'change-' + plan.id}>What will change</h3>
             {plan.steps.length === 0 ? (
               <p className="pb-note">No executable repair is available for this plan.</p>
             ) : (
@@ -157,7 +158,7 @@ export function PlanDetail({
           </section>
 
           <section className="pb-plan-block" aria-labelledby={'result-' + plan.id}>
-            <h3 id={'result-' + plan.id}>Expected result</h3>
+            <h3 id={'result-' + plan.id}>What to expect</h3>
             {expected.length > 0 ? (
               <ul className="pb-plan-summary-list">
                 {expected.map((value, index) => (
@@ -240,7 +241,7 @@ export function PlanDetail({
         </aside>
       </div>
 
-      <div className="pb-apply-bar">
+      <div className={`pb-apply-bar${latestRun ? '' : ' pb-apply-bar-sticky'}`}>
         <div className="pb-apply-copy">
           <p className="pb-note">{applyNote}{blockers.length > 0 ? ` Waiting: ${blockers.join(', ')}.` : ''}</p>
           {plan.steps.length > 0 && (
@@ -272,7 +273,7 @@ export function PlanDetail({
         <div className="pb-plan-result">
           <div className="pb-section-head">
             <h3 className="pb-section-title">Verification result</h3>
-            <Badge appearance="tint" color="subtle">
+            <Badge appearance="outline" color="subtle" className="pb-status" data-status={latestRun.status}>
               {runStatusLabel(latestRun.status)}
             </Badge>
           </div>
@@ -280,16 +281,7 @@ export function PlanDetail({
           {latestRun.verification.map((verification, index) => (
             <div key={index}>
               <p className="pb-note">{verification.summary}</p>
-              <ul className="pb-detail-list">
-                {verification.checks.map((check) => (
-                  <li className={check.passed ? 'pb-check-pass' : 'pb-check-fail'} key={check.name}>
-                    {check.passed ? 'Passed' : 'Failed'}: {check.name}
-                    {check.before !== undefined || check.after !== undefined
-                      ? ' (' + (check.before ?? '?') + ' → ' + (check.after ?? '?') + ')'
-                      : ''}
-                  </li>
-                ))}
-              </ul>
+              <VerificationChecks checks={verification.checks} />
               {verification.pendingReboot && (
                 <div className="pb-pending-reboot" role="status">
                   A Windows restart is required. Verification remains pending.

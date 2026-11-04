@@ -61,12 +61,10 @@ export function OperationProgress({
         )}
       </div>
 
-      {percent !== null && (
-        <div className="pb-progress-meter">
-          <ProgressBar value={percent / 100} aria-label={`${stage} progress`} />
-          <span className="pb-progress-percent">{Math.round(percent)}%</span>
-        </div>
-      )}
+      <div className="pb-progress-meter">
+        <ProgressBar value={percent === null ? undefined : percent / 100} aria-label={`${stage} progress`} />
+        {percent !== null && <span className="pb-progress-percent">{Math.round(percent)}%</span>}
+      </div>
 
       {canCancel && (
         <Button appearance="secondary" size="small" disabled={cancelling} onClick={onCancel}>

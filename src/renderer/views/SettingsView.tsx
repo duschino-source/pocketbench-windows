@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Badge, Button, Input, ProgressBar } from '@fluentui/react-components';
+import { Badge, Button, Input, ProgressBar, Radio, RadioGroup } from '@fluentui/react-components';
 import {
   ArrowClockwiseRegular,
   ArrowDownloadRegular,
@@ -8,6 +8,7 @@ import {
 } from '@fluentui/react-icons';
 import { formatUSD, isHttpsUrl, updateStatusLabel } from '../format';
 import { isBusy, type ViewProps } from '../types';
+import { useAppearance, type Appearance } from '../appearance';
 
 function realPercent(value: number | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) return null;
@@ -16,6 +17,7 @@ function realPercent(value: number | undefined): number | null {
 
 export function SettingsView(props: ViewProps): React.ReactElement {
   const { state, busy, updates } = props;
+  const { appearance, setAppearance } = useAppearance();
   const [keyInput, setKeyInput] = React.useState('');
   const active = isBusy(busy);
   const budget = state.budget;
@@ -44,10 +46,27 @@ export function SettingsView(props: ViewProps): React.ReactElement {
 
   return (
     <div>
+      <section className="pb-section" aria-labelledby="settings-appearance">
+        <div className="pb-section-head">
+          <h2 className="pb-section-title" id="settings-appearance">Appearance</h2>
+        </div>
+        <p className="pb-note">Choose a theme, or follow your Windows appearance.</p>
+        <RadioGroup
+          aria-labelledby="settings-appearance"
+          layout="horizontal"
+          className="pb-appearance-options"
+          value={appearance}
+          onChange={(_, data) => setAppearance(data.value as Appearance)}
+        >
+          <Radio value="system" label="System" />
+          <Radio value="light" label="Light" />
+          <Radio value="dark" label="Dark" />
+        </RadioGroup>
+      </section>
       <section className="pb-section" aria-labelledby="settings-connection">
         <div className="pb-section-head">
           <h2 className="pb-section-title" id="settings-connection">
-            Research connection
+            AI research connection
           </h2>
           <div className="pb-section-action">
             <Badge appearance="tint" color="subtle">
@@ -108,10 +127,62 @@ export function SettingsView(props: ViewProps): React.ReactElement {
         </form>
       </section>
 
+      <section className="pb-section pb-advanced" aria-labelledby="settings-usage">
+        <div className="pb-section-head">
+          <h2 className="pb-section-title" id="settings-usage">Usage</h2>
+        </div>
+        <p className="pb-note">
+          Estimates include reserved requests. They are not a bill; actual charges appear in your Meta billing
+          account.
+        </p>
+        <div className="pb-grid" role="list" aria-label="Budget estimates">
+          <div className="pb-metric" role="listitem">
+            <div className="pb-metric-label">Estimated spend</div>
+            <div className="pb-metric-value">{formatUSD(budget.spent)}</div>
+          </div>
+          <div className="pb-metric" role="listitem">
+            <div className="pb-metric-label">Reserved</div>
+            <div className="pb-metric-value">{formatUSD(budget.reserved)}</div>
+          </div>
+          <div className="pb-metric" role="listitem">
+            <div className="pb-metric-label">Remaining</div>
+            <div className="pb-metric-value">{formatUSD(budget.remaining)}</div>
+          </div>
+          <div className="pb-metric" role="listitem">
+            <div className="pb-metric-label">Limit</div>
+            <div className="pb-metric-value">{formatUSD(budget.limit)}</div>
+            <div className="pb-metric-sub">{budget.requests} requests recorded</div>
+          </div>
+        </div>
+
+        <details className="pb-technical">
+          <summary>Model and local configuration</summary>
+          <dl className="pb-kv">
+            <dt>Model</dt>
+            <dd>{settings.model}</dd>
+            <dt>Budget limit</dt>
+            <dd>{formatUSD(settings.budgetLimit)}</dd>
+            <dt>Local data directory</dt>
+            <dd className="pb-mono">{settings.dataDirectory}</dd>
+            <dt>Lab status</dt>
+            <dd>
+              <Badge appearance="tint" color="subtle">
+                {settings.labMode ? 'Isolated lab mode' : 'Live mode'}
+              </Badge>
+            </dd>
+          </dl>
+          {settings.labMode && (
+            <p className="pb-note">
+              Lab mode is conspicuous by design: repairs validate against an isolated test profile.
+            </p>
+          )}
+        </details>
+      </section>
+
       <section className="pb-section" aria-labelledby="settings-updates">
         <div className="pb-section-head">
           <h2 className="pb-section-title" id="settings-updates">
-            PocketBench updates
+            Updates
           </h2>
           <div className="pb-section-action">
             <Badge appearance="tint" color="subtle">
@@ -206,61 +277,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
         </p>
       </section>
 
-      <section className="pb-section pb-advanced" aria-label="Advanced settings">
-        <details className="pb-advanced-disclosure">
-          <summary>
-            <span className="pb-advanced-title">Advanced</span>
-            <span className="pb-advanced-hint">Budget estimates, model, local data</span>
-          </summary>
-          <div className="pb-advanced-body">
-            <h3 className="pb-subsection-title">Research budget</h3>
-            <p className="pb-note">
-              Estimates include reserved requests. They are not a bill; actual charges appear in your Meta billing
-              account.
-            </p>
-            <div className="pb-grid" role="list" aria-label="Budget estimates">
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Estimated spend</div>
-                <div className="pb-metric-value">{formatUSD(budget.spent)}</div>
-              </div>
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Reserved</div>
-                <div className="pb-metric-value">{formatUSD(budget.reserved)}</div>
-              </div>
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Remaining</div>
-                <div className="pb-metric-value">{formatUSD(budget.remaining)}</div>
-              </div>
-              <div className="pb-metric" role="listitem">
-                <div className="pb-metric-label">Limit</div>
-                <div className="pb-metric-value">{formatUSD(budget.limit)}</div>
-                <div className="pb-metric-sub">{budget.requests} requests recorded</div>
-              </div>
-            </div>
 
-            <h3 className="pb-subsection-title">Local configuration</h3>
-            <dl className="pb-kv">
-              <dt>Model</dt>
-              <dd>{settings.model}</dd>
-              <dt>Budget limit</dt>
-              <dd>{formatUSD(settings.budgetLimit)}</dd>
-              <dt>Local data directory</dt>
-              <dd className="pb-mono">{settings.dataDirectory}</dd>
-              <dt>Lab status</dt>
-              <dd>
-                <Badge appearance="tint" color="subtle">
-                  {settings.labMode ? 'Isolated lab mode' : 'Live mode'}
-                </Badge>
-              </dd>
-            </dl>
-            {settings.labMode && (
-              <p className="pb-note">
-                Lab mode is conspicuous by design: repairs validate against an isolated test profile.
-              </p>
-            )}
-          </div>
-        </details>
-      </section>
     </div>
   );
 }
