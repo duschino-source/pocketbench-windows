@@ -36,6 +36,18 @@ test('launches, shows the workspace, and opens the palette with Ctrl+K', async (
     // Navigation stays instant: route headings swap without replay cost.
     await page.getByRole('button', { name: 'Apps' }).click();
     await expect(page.locator('h1')).toHaveText('Applications');
+
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('radio', { name: 'Light', exact: true }).check();
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await page.getByRole('radio', { name: 'Light', exact: true }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByRole('radio', { name: 'Dark', exact: true })).toBeChecked();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.reload();
+    await expect(page.locator('h1')).toHaveText('Overview');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   } finally {
     await app.close();
   }

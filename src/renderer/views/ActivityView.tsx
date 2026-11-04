@@ -3,6 +3,7 @@ import { Badge, Button } from '@fluentui/react-components';
 import { ArrowUndoRegular } from '@fluentui/react-icons';
 import { formatDateTime, planStatusLabel, runStatusLabel } from '../format';
 import { isBusy, type ViewProps } from '../types';
+import { VerificationChecks } from '../components/VerificationChecks';
 
 export function ActivityView(props: ViewProps): React.ReactElement {
   const { state, busy } = props;
@@ -41,18 +42,21 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                       {run.executions.length} step execution{run.executions.length === 1 ? '' : 's'}
                     </div>
                     {run.error && <div className="pb-row-sub">Error: {run.error}</div>}
-                    {run.executions.map((execution) => (
-                      <div key={execution.step.id} className="pb-row-sub">
-                        {execution.success ? 'Succeeded' : 'Failed'}: {execution.step.title}
-                        {execution.backupId ? ` (backup ${execution.backupId})` : ''}
-                      </div>
-                    ))}
-                    {run.verification.map((result, index) => (
-                      <div key={`${run.id}-verification-${index}`} className="pb-row-sub">
-                        Verification: {result.summary} —{' '}
-                        {result.checks.map((check) => check.name).join(', ') || 'no checks recorded'}
-                      </div>
-                    ))}
+                    <details className="pb-technical pb-operation-details">
+                      <summary>Operation details ({run.executions.length} steps)</summary>
+                      {run.executions.map((execution) => (
+                        <div key={execution.step.id} className="pb-row-sub">
+                          {execution.success ? 'Succeeded' : 'Failed'}: {execution.step.title}
+                          {execution.backupId ? ` (backup ${execution.backupId})` : ''}
+                        </div>
+                      ))}
+                      {run.verification.map((result, index) => (
+                        <div key={`${run.id}-verification-${index}`}>
+                          <p className="pb-row-sub">{result.summary}</p>
+                          <VerificationChecks checks={result.checks} />
+                        </div>
+                      ))}
+                    </details>
                     {pendingReboot && (
                       <div className="pb-pending-reboot" role="status">
                         Pending reboot: verification remains incomplete until Windows restarts.
@@ -60,7 +64,7 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                     )}
                   </div>
                   <div className="pb-row-side pb-activity-side">
-                    <Badge appearance="outline" color="subtle" className="pb-neutral-status">
+                    <Badge appearance="outline" color="subtle" className="pb-neutral-status pb-status" data-status={run.status}>
                       Status: {runStatusLabel(run.status)}
                     </Badge>
                     {run.canUndo ? (
@@ -111,7 +115,7 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                   </div>
                 </div>
                 <div className="pb-row-side pb-activity-side">
-                  <Badge appearance="outline" color="subtle" className="pb-neutral-status">
+                  <Badge appearance="outline" color="subtle" className="pb-neutral-status pb-status" data-status={plan.status}>
                     Status: {planStatusLabel(plan.status)}
                   </Badge>
                   <Button appearance="secondary" size="small" onClick={() => props.onSelectPlan(plan.id)}>
