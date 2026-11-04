@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AppSettings, AppState, DiagnosticEvidence, InvestigateRequest, ProgressEvent, RepairPlan, RepairRun, SystemSnapshot } from '../shared/contracts'
+import { hasPendingUndo, isRestored, isUndoEligible } from '../shared/contracts'
 import type { WindowsEngine } from './windows'
 import type { MeteredModel } from './model'
 import { investigate } from './research'
@@ -15,6 +16,7 @@ import { classifySymptomCategory } from '../shared/investigation'
 export class Controller {
   private snapshot: SystemSnapshot | null = null
   private plans: RepairPlan[] = []
+  private restoredPlans = new Set<string>()
   private history: RepairRun[] = []
   private busy = false
   private scanAbort:AbortController|null=null
@@ -33,14 +35,21 @@ export class Controller {
     if (existsSync(this.file)) {
       try {
         const saved=JSON.parse(readFileSync(this.file,'utf8'))
+        this.plans=Array.isArray(saved.plans)?saved.plans.filter((plan:RepairPlan)=>plan && typeof plan.id==='string' && Array.isArray(plan.steps) && plan.review && Array.isArray(plan.sources) && Array.isArray(plan.evidence)).slice(0,50):[]
+        for(const plan of this.plans)if(plan.status==='ready' || (plan.status==='needs-validation' && plan.review.approved && plan.steps.length>0)) { this.restoredPlans.add(plan.id);plan.status='needs-validation';plan.reason='Scan this PC to recheck saved targets and values before applying.' }
         this.history=Array.isArray(saved.history)?saved.history:[]
-        for (const run of this.history) if (run.status==='running') { run.status='pending-verification';run.error='The application closed before verification completed. Inspect recorded changes before retrying.' }
+        for (const run of this.history) {
+          if (run.status==='running') { run.status='pending-verification';run.error='The application closed before verification completed. Inspect recorded changes before retrying.' }
+          // Recompute eligibility so older records also benefit from partial
+          // recovery, without re-offering a run that was fully undone.
+          run.canUndo=hasPendingUndo(run)
+        }
       } catch { renameSync(this.file,this.file+'.corrupt-'+Date.now()) }
     }
   }
   private persist() {
     const temporary=this.file+'.tmp'
-    writeFileSync(temporary,JSON.stringify({history:this.history.slice(0,200)},null,2),{mode:0o600})
+    writeFileSync(temporary,JSON.stringify({history:this.history.slice(0,200),plans:this.plans.slice(0,50)},null,2),{mode:0o600})
     renameSync(temporary,this.file)
   }
   private async exclusive<T>(action: () => Promise<T>): Promise<T> {
@@ -55,6 +64,17 @@ export class Controller {
         this.snapshot=partial
         this.progress({phase:'scan',message:'Windows findings are ready. Checking installed app repair capabilities…',snapshot:partial})
       },this.scanAbort.signal);this.snapshot=snapshot
+      for(const plan of this.plans.filter(plan=>this.restoredPlans.has(plan.id))) {
+        try {
+          for(const step of plan.steps) {
+            const canonical=this.engine.validateStep(step,snapshot)
+            if(JSON.stringify(canonical.params)!==JSON.stringify(step.params) || canonical.targetId!==step.targetId || canonical.requiresAdmin!==step.requiresAdmin || canonical.reversible!==step.reversible)throw new Error('The repair target or impact changed.')
+            if(typeof this.engine.previewStep==='function' && JSON.stringify(await this.engine.previewStep(canonical,snapshot))!==JSON.stringify(step.preview))throw new Error('A current setting changed since this plan was reviewed.')
+          }
+          plan.status='ready';plan.reason='Saved research rechecked against current local values.'
+        } catch(error) {plan.status='blocked';plan.reason=`Saved plan needs fresh research: ${(error as Error).message}`;plan.review.approved=false}
+        this.restoredPlans.delete(plan.id)
+      }
       this.scanAbort=null
       const bootTime=Date.now()-snapshot.machine.uptime*1000
       for (const run of this.history.filter(run=>run.status==='pending-verification' && run.finishedAt && Date.parse(run.finishedAt)<bootTime)) {
@@ -92,7 +112,7 @@ export class Controller {
         }
         localPlan=local.plan
         if(localPlan) {
-          const fresh=await this.engine.scan()
+          const fresh=await this.engine.scan();snapshot={...fresh,diagnostics:snapshot.diagnostics};this.snapshot=snapshot
           const step=localPlan.steps[0]
           const service=fresh.services.find(service=>service.name===step.targetId)
           if(service?.status.toLowerCase()==='stopped' && /^(auto|automatic)$/i.test(service.startType) && service.triggerStart!==true) {
@@ -124,19 +144,24 @@ export class Controller {
         return canonical
       }) }
       catch (error) { plan.status='blocked';plan.reason=String((error as Error).message);plan.review.approved=false }
+      if(plan.status==='ready' && typeof this.engine.previewStep==='function') {
+        try { for(const step of plan.steps) step.preview=await this.engine.previewStep(step,this.snapshot!) }
+        catch(error) {plan.status='blocked';plan.reason=`Current values could not be read: ${(error as Error).message}`;plan.review.approved=false}
+      }
       if (!plan.steps.length && plan.status==='ready') { plan.status='needs-validation';plan.reason='No applicable executable repair was established.';plan.review.approved=false }
-      this.plans.unshift(plan);this.plans=this.plans.slice(0,50);return plan
+      this.plans.unshift(plan);this.plans=this.plans.slice(0,50);this.persist();return plan
     })
   }
   async apply(planId: string): Promise<RepairRun> {
     return this.exclusive(async()=> {
       const plan=this.plans.find(p=>p.id===planId)
       if (!plan || plan.status!=='ready' || !plan.review.approved || !plan.steps.length) throw new Error('Only a stored, reviewed, Ready repair can be applied.')
-      if (this.history.some(run=>run.planId===planId && ['running','fixed','pending-verification'].includes(run.status))) throw new Error('This plan has already been applied. Investigate again before making further changes.')
+      if (this.history.some(run=>run.planId===planId && ['running','fixed','pending-verification','partially-undone'].includes(run.status))) throw new Error('This plan has already been applied. Investigate again before making further changes.')
       this.progress({phase:'apply',message:'Rechecking targets and repair preconditions…',planId})
       const fresh=await this.engine.scan()
       const steps=plan.steps.map(step=>this.engine.validateStep(step,fresh))
-      for (let i=0;i<steps.length;i++) if (JSON.stringify(steps[i].params)!==JSON.stringify(plan.steps[i].params) || steps[i].requiresAdmin!==plan.steps[i].requiresAdmin || steps[i].reversible!==plan.steps[i].reversible) throw new Error('Repair impact changed after investigation. Research again before applying.')
+      for (let i=0;i<steps.length;i++) if (JSON.stringify(steps[i].params)!==JSON.stringify(plan.steps[i].params) || steps[i].requiresAdmin!==plan.steps[i].requiresAdmin || steps[i].reversible!==plan.steps[i].reversible) { plan.status='needs-validation';plan.reason='Repair impact changed after investigation. Research again before applying.';plan.review.approved=false;this.persist();throw new Error(plan.reason) }
+      if(typeof this.engine.previewStep==='function')for(let i=0;i<steps.length;i++){const currentPreview=await this.engine.previewStep(steps[i],fresh);if(JSON.stringify(currentPreview)!==JSON.stringify(plan.steps[i].preview)){plan.steps[i].preview=currentPreview;plan.status='needs-validation';plan.reason='A setting changed since review. Investigate again before applying.';plan.review.approved=false;this.persist();throw new Error(plan.reason)}}
       const run:RepairRun={id:randomUUID(),planId,title:plan.title,createdAt:new Date().toISOString(),status:'running',executions:[],verification:[],canUndo:false}
       this.history.unshift(run);this.persist()
       try {
@@ -151,7 +176,7 @@ export class Controller {
         run.status=run.verification.some(v=>v.pendingReboot)?'pending-verification':run.verification.every(v=>v.passed)?'fixed':'failed'
       } catch (error) { run.status='failed';run.error=(error as Error).message }
       run.finishedAt=new Date().toISOString()
-      run.canUndo=run.executions.length>0 && run.executions.every(e=>e.step.reversible && Boolean(e.backupId) && e.success)
+      run.canUndo=run.executions.some(isUndoEligible)
       this.persist();this.snapshot=await this.engine.scan().catch(()=>fresh)
       return run
     })
@@ -159,14 +184,45 @@ export class Controller {
   async undo(runId: string): Promise<RepairRun> {
     return this.exclusive(async()=> {
       const run=this.history.find(r=>r.id===runId)
-      if (!run || !run.canUndo || run.status==='undone') throw new Error('This repair does not have a complete restorable backup.')
-      const checks=[]
-      for (const execution of [...run.executions].reverse()) {
+      if (!run) throw new Error('This repair does not have a restorable backup.')
+      if (run.status==='undone') throw new Error('This repair has already been undone.')
+      const eligible=run.executions.filter(isUndoEligible)
+      if (!eligible.length) throw new Error('This repair does not have a restorable backup.')
+      const previouslyFailedUndo=run.undoError
+      // Restore in reverse order. Completed restorations are durable and are
+      // always skipped, so a retry only revisits steps that have not succeeded.
+      const pending=[...run.executions].reverse().filter(execution=>isUndoEligible(execution) && !isRestored(execution));if (!pending.length) throw new Error('This repair has already been undone.')
+      let failure:string|undefined
+      for (const execution of pending) {
         this.progress({phase:'undo',message:'Restoring: '+execution.step.title,planId:run.planId})
-        const check=await this.engine.undo(execution);checks.push(check)
-        if (!check.passed) { run.error=check.summary;this.persist();throw new Error(check.summary) }
+        try {
+          const check=await this.engine.undo(execution)
+          execution.restoration={status:check.passed?'restored':'failed',finishedAt:new Date().toISOString(),summary:check.summary,checks:check.checks}
+          this.persist()
+          if (!check.passed) { failure=check.summary;break }
+        } catch(error) {
+          // Keep the guard's own message; never treat a thrown stale-edit
+          // refusal as a successful restoration.
+          const summary=(error as Error).message || String(error)
+          execution.restoration={status:'failed',finishedAt:new Date().toISOString(),summary,checks:[]}
+          this.persist();failure=summary;break
+        }
       }
-      run.status='undone';run.canUndo=false;run.verification=checks;this.persist();this.snapshot=await this.engine.scan();return run
+      const residual=run.executions.some(execution=>!isUndoEligible(execution))
+      const fullyRestored=eligible.every(isRestored)
+      run.status=fullyRestored && !residual ? 'undone' : 'partially-undone'
+      run.canUndo=hasPendingUndo(run)
+      if (failure) {
+        run.undoError=failure
+        if (!run.error || run.error===previouslyFailedUndo) run.error=failure
+      } else if (previouslyFailedUndo) {
+        run.undoError=undefined
+        if (run.error===previouslyFailedUndo) run.error=undefined
+      }
+      this.persist()
+      this.snapshot=await this.engine.scan().catch(()=>this.snapshot!)
+      if (failure) throw new Error(failure)
+      return run
     })
   }
 }

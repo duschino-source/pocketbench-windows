@@ -27,6 +27,7 @@ export interface RepairStep {
   id: string; operation: OperationId; title: string; targetId: string
   params: Record<string, JsonValue>; requiresAdmin: boolean; reversible: boolean
   impact: string; verification: string
+  preview?: { resource: string; before: string; after: string }
 }
 export interface RepairCapability { operation: OperationId; description: string; targetId: string; constraints: string }
 export interface RepairPlan {
@@ -40,14 +41,38 @@ export interface VerificationResult {
   passed: boolean; pendingReboot?: boolean; summary: string
   checks: { name: string; passed: boolean; before?: string; after?: string }[]
 }
+/**
+ * Per-step undo outcome. Absence means the step has never been attempted.
+ * A `failed` result is retryable; `restored` is terminal and must never be
+ * restored again by a later retry.
+ */
+export interface RestorationResult {
+  status: 'restored' | 'failed'; finishedAt: string; summary: string
+  checks: VerificationResult['checks']
+}
 export interface StepExecution {
   step: RepairStep; startedAt: string; finishedAt: string; success: boolean
   output: string; backupId?: string; data: Record<string, JsonValue>
+  restoration?: RestorationResult
 }
 export interface RepairRun {
   id: string; planId: string; title: string; createdAt: string; finishedAt?: string
-  status: 'running' | 'fixed' | 'failed' | 'pending-verification' | 'undone'
+  status: 'running' | 'fixed' | 'failed' | 'pending-verification' | 'undone' | 'partially-undone'
   executions: StepExecution[]; verification: VerificationResult[]; error?: string; canUndo: boolean
+  /** A restoration failure is kept separately so the original apply error is not lost. */
+  undoError?: string
+}
+/** Only a successful, backed-up, reversible change may be restored. */
+export function isUndoEligible(execution: StepExecution): boolean {
+  return execution.success && execution.step.reversible && Boolean(execution.backupId)
+}
+/** A completed restoration is terminal and is skipped by every retry. */
+export function isRestored(execution: StepExecution): boolean {
+  return execution.restoration?.status === 'restored'
+}
+/** True while at least one eligible step still needs (or may retry) restoration. */
+export function hasPendingUndo(run: RepairRun): boolean {
+  return run.status !== 'undone' && run.executions.some((execution) => isUndoEligible(execution) && !isRestored(execution))
 }
 export type SymptomCategory = 'performance' | 'connectivity' | 'updates' | 'app'
 export interface InvestigateRequest { symptom: string; appId?: string; evidenceId?: string; category?: SymptomCategory }

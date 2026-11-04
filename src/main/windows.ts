@@ -134,6 +134,21 @@ export class WindowsEngine {
     return capabilities
   }
   iconTarget(id:string):IconTarget|undefined {return this.iconTargets.get(id)}
+  async previewStep(step:RepairStep,snapshot:SystemSnapshot):Promise<{resource:string;before:string;after:string}> {
+    step=this.validateStep(step,snapshot)
+    if(step.operation.startsWith('app.'))return this.apps.previewStep(step,snapshot)
+    if(step.operation==='windows.clearUserProxy') {
+      const proxy=this.labMode?this.readLab<ProxyState>('proxy',proxyState({enable:0,server:''})):await userOperation<ProxyState>('getProxy')
+      return {resource:'Current user proxy',before:`Manual proxy: ${proxy.enable?'enabled':'disabled'} (ProxyEnable=${proxy.enable}; ProxyServer=${proxy.server || '(empty)'})`,after:'Manual proxy: disabled (ProxyEnable=0; ProxyServer=(empty))'}
+    }
+    if(step.operation==='windows.disableStartup') {
+      const entry=snapshot.startup.find(item=>item.id===step.targetId)!
+      return {resource:`Startup: ${entry.name}`,before:`Enabled: ${entry.command}`,after:'Disabled; original command backed up'}
+    }
+    if(step.operation==='windows.startService')return {resource:`Service: ${step.targetId}`,before:'Stopped',after:'Running'}
+    if(step.operation==='windows.flushDns')return {resource:'Windows DNS resolver cache',before:'Current cached records',after:'Cache cleared; records rebuild as needed'}
+    return {resource:'Windows system files and image',before:'Current integrity state',after:'DISM and SFC repair attempt; result verified after execution'}
+  }
   validateStep(step:RepairStep,snapshot:SystemSnapshot):RepairStep {
     if(!step || typeof step.id!=='string' || !step.id || !Object.hasOwn(OPERATION_META,step.operation) || !step.params || typeof step.params!=='object' || Array.isArray(step.params))throw new Error('Invalid repair operation.')
     if(step.operation.startsWith('app.'))return this.apps.validate(step,snapshot)

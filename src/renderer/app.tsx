@@ -281,6 +281,9 @@ export default function App(): React.ReactElement {
         await refreshState();
         setNotice(`Undo finished for “${run.title}”: ${run.status}.`);
       } catch (error: unknown) {
+        // The controller persists each restoration outcome before reporting a
+        // failure, so refresh even on error to show truthful partial progress.
+        await refreshState().catch(() => undefined);
         fail(error);
       } finally {
         setBusy((prev) => ({ ...prev, undoingRunId: null }));

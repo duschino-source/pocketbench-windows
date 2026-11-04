@@ -129,6 +129,22 @@ export class AppRepairs {
     if(!matches.length)return undefined
     try{return JSON.parse(matches[matches.length-1][1])}catch{throw new Error('Firefox preference format cannot be safely verified.')}
   }
+  async previewStep(step:RepairStep,snapshot:SystemSnapshot):Promise<{resource:string;before:string;after:string}> { step=this.validate(step,snapshot)
+    const app=snapshot.apps.find(item=>item.id===step.targetId)
+    if(!app)throw new Error('Application is no longer in the inventory.')
+    const roots=this.roots(app)
+    if(step.operation==='app.patchConfig') {
+      const root=roots.profile||roots.vault
+      if(!root)throw new Error('No unique supported profile or vault is available.')
+      const file=roots.profile?this.prefFile(roots.profile):join(roots.vault!,'.obsidian','appearance.json')
+      safeFile(file,root,this.lab)
+      const before=roots.profile?this.readPref(file,'network.proxy.type'):JSON.parse(readFileSync(file,'utf8')).cssTheme
+      const format=(val:unknown)=>val===undefined||val===null?'(unset)':val===''?'(default / none)':roots.profile&&val===1?'1 (manual proxy enabled)':roots.profile&&val===0?'0 (manual proxy disabled)':String(val);return {resource:`${app.name}: ${String(step.params.setting)}`,before:format(before),after:format(step.params.value)}
+    }
+    if(step.operation==='app.updatePackage')return {resource:`${app.name}: ${app.packageId}`,before:`Version ${app.version}`,after:'Update to exact WinGet package; installed version verified afterward'}
+    if(step.operation==='app.quarantineCache')return {resource:`${app.name}: allow-listed cache`,before:roots.caches.map(item=>basename(item.path)).join(', ')||'No eligible cache found',after:'Eligible cache directories moved to restorable quarantine'}
+    return {resource:`${app.name}: application process`,before:'Current process state',after:'Known executable restarted and checked'}
+  }
   private async close(app:AppTarget,exe?:string):Promise<boolean> {
     if(this.lab.labMode)return false
     if(!exe)throw new Error('The exact app executable could not be identified safely.')

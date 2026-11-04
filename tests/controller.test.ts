@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Controller } from '../src/main/controller'
-import type { RepairPlan, RepairStep, SystemSnapshot } from '../src/shared/contracts'
+import type { RepairPlan, RepairStep, StepExecution, SystemSnapshot } from '../src/shared/contracts'
 
 vi.mock('../src/main/research',()=>({investigate:vi.fn()}))
 vi.mock('../src/main/diagnostic-agent',()=>({runDiagnosticAgent:vi.fn()}))
@@ -19,13 +19,14 @@ beforeEach(async()=>{const actual=await vi.importActual<typeof import('../src/ma
 const step:RepairStep={id:'step',operation:'windows.clearUserProxy',title:'Clear stale proxy',targetId:'windows',params:{},requiresAdmin:false,reversible:true,impact:'Changes user proxy',verification:'Proxy is disabled'}
 const plan:RepairPlan={id:'plan',createdAt:new Date().toISOString(),title:'Repair connection',summary:'Diagnosed proxy issue',target:{kind:'windows',name:'Windows'},status:'ready',reason:'Verified applicable',evidence:[],sources:[],steps:[step],review:{approved:true,rationale:'Applicable',concerns:[]}}
 const snapshot:SystemSnapshot={scannedAt:new Date().toISOString(),platform:'win32',machine:{name:'test',os:'Windows',memoryTotal:1,memoryFree:1,uptime:1,cpuCount:1},metrics:{diskFree:1,diskTotal:1,cpuPercent:null},diagnostics:[],apps:[],startup:[],services:[],labMode:true}
-function fixture(verifyPassed:boolean,labMode=true,hasApiKey=true) {
+function fixture(verifyPassed:boolean,labMode=true,hasApiKey=true,steps:RepairStep[]=[step]) {
   const dir=mkdtempSync(join(tmpdir(),'pocketbench-controller-'))
-  const engine={scan:vi.fn(async()=>({...snapshot,labMode})),capabilities:vi.fn(()=>[]),validateStep:vi.fn((s:RepairStep)=>s),execute:vi.fn(async(s:RepairStep)=>({step:s,startedAt:'now',finishedAt:'now',success:true,output:'command exited zero',backupId:'backup',data:{}})),verify:vi.fn(async()=>({passed:verifyPassed,summary:verifyPassed?'Verified':'The proxy is still enabled',checks:[{name:'Proxy disabled',passed:verifyPassed}]})),undo:vi.fn(async()=>({passed:true,summary:'Restored',checks:[{name:'Original proxy restored',passed:true}]}))}
+  const engine:any={scan:vi.fn(async()=>({...snapshot,labMode})),capabilities:vi.fn(()=>[]),validateStep:vi.fn((s:RepairStep)=>s),execute:vi.fn(async(s:RepairStep)=>({step:s,startedAt:'now',finishedAt:'now',success:true,output:'command exited zero',backupId:'backup',data:{}})),verify:vi.fn(async()=>({passed:verifyPassed,summary:verifyPassed?'Verified':'The proxy is still enabled',checks:[{name:'Proxy disabled',passed:verifyPassed}]})),undo:vi.fn(async()=>({passed:true,summary:'Restored',checks:[{name:'Original proxy restored',passed:true}]}))}
   const model={budget:async()=>({limit:90,spent:0,reserved:0,remaining:90,requests:0})}
-  const controller=new Controller(dir,engine as any,model as any,()=>({hasApiKey,budgetLimit:90,model:'muse-spark-1.3',labMode,dataDirectory:dir}),()=>{})
-  vi.mocked(investigate).mockResolvedValue(structuredClone(plan))
-  return {controller,engine,model,cleanup:()=>rmSync(dir,{recursive:true,force:true})}
+  const settings=()=>({hasApiKey,budgetLimit:90,model:'muse-spark-1.3',labMode,dataDirectory:dir})
+  const controller=new Controller(dir,engine as any,model as any,settings,()=>{})
+  vi.mocked(investigate).mockResolvedValue({...structuredClone(plan),steps:structuredClone(steps)})
+  return {controller,engine,model,dir,settings,cleanup:()=>rmSync(dir,{recursive:true,force:true})}
 }
 describe('repair workflow authority',()=>{
   it('publishes partial scans, cancels only read-only scans, and holds the busy lock until cancellation settles',async()=>{
@@ -68,10 +69,176 @@ describe('repair workflow authority',()=>{
     const f=fixture(true);try {await f.controller.investigate({symptom:'network fails'});const run=await f.controller.apply('plan');expect(run.status).toBe('fixed');await expect(f.controller.apply('plan')).rejects.toThrow('already');expect((await f.controller.undo(run.id)).status).toBe('undone');expect(f.engine.undo).toHaveBeenCalledOnce()}finally{f.cleanup()}
   })
   it('revalidates impact and refuses changed privileges before any mutation',async()=>{
-    const f=fixture(true);try {await f.controller.investigate({symptom:'network fails'});f.engine.validateStep.mockImplementation(s=>({...s,requiresAdmin:true}));await expect(f.controller.apply('plan')).rejects.toThrow('impact changed');expect(f.engine.execute).not.toHaveBeenCalled()}finally{f.cleanup()}
+    const f=fixture(true);try {await f.controller.investigate({symptom:'network fails'});f.engine.validateStep.mockImplementation((s:RepairStep)=>({...s,requiresAdmin:true}));await expect(f.controller.apply('plan')).rejects.toThrow('impact changed');expect(f.engine.execute).not.toHaveBeenCalled()}finally{f.cleanup()}
   })
   it('blocks parameters that silently retarget a reviewed step',async()=>{
-    const f=fixture(true);try {f.engine.validateStep.mockImplementation(s=>({...s,targetId:'other-resource'}));const result=await f.controller.investigate({symptom:'network fails'});expect(result.status).toBe('blocked');await expect(f.controller.apply('plan')).rejects.toThrow('Ready');expect(f.engine.execute).not.toHaveBeenCalled()}finally{f.cleanup()}
+    const f=fixture(true);try {f.engine.validateStep.mockImplementation((s:RepairStep)=>({...s,targetId:'other-resource'}));const result=await f.controller.investigate({symptom:'network fails'});expect(result.status).toBe('blocked');await expect(f.controller.apply('plan')).rejects.toThrow('Ready');expect(f.engine.execute).not.toHaveBeenCalled()}finally{f.cleanup()}
+  })
+})
+describe('partial-failure recovery',()=>{
+  const secondStep:RepairStep={...step,id:'step-2',operation:'windows.disableStartup',title:'Disable startup entry',targetId:'startup-entry'}
+  const thirdStep:RepairStep={...step,id:'step-3',operation:'app.patchConfig',title:'Patch config',targetId:'app'}
+  function execution(s:RepairStep,success=true):StepExecution {
+    return {step:s,startedAt:'now',finishedAt:'now',success,output:success?'ok':'step failed',...(success?{backupId:'backup-'+s.id}:{}),data:{}}
+  }
+  it('undoes an earlier successful reversible step even when a later step failed',async()=>{
+    const f=fixture(true,true,true,[step,secondStep])
+    try {
+      f.engine.execute.mockImplementation(async(s:RepairStep)=>execution(s,s.id!=='step-2'))
+      await f.controller.investigate({symptom:'network fails'})
+      const run=await f.controller.apply('plan')
+      expect(run.status).toBe('failed')
+      expect(run.canUndo).toBe(true)
+      const undone=await f.controller.undo(run.id)
+      expect(undone.status).toBe('partially-undone')
+      expect(undone.executions[0].restoration).toMatchObject({status:'restored',summary:'Restored'})
+      expect(undone.executions[1].restoration).toBeUndefined()
+      expect(undone.canUndo).toBe(false)
+      await expect(f.controller.undo(run.id)).rejects.toThrow('already been undone')
+      expect(f.engine.undo).toHaveBeenCalledOnce()
+      expect(f.engine.undo.mock.calls[0][0].step.id).toBe('step')
+    } finally {f.cleanup()}
+  })
+  it('never attempts an irreversible successful effect while restoring the reversible subset',async()=>{
+    const irreversible:RepairStep={...secondStep,reversible:false,title:'Rebuild package'}
+    const f=fixture(true,true,true,[step,irreversible])
+    try {
+      await f.controller.investigate({symptom:'network fails'})
+      const run=await f.controller.apply('plan')
+      expect(run.status).toBe('fixed')
+      expect(run.canUndo).toBe(true)
+      const undone=await f.controller.undo(run.id)
+      expect(undone.status).toBe('partially-undone')
+      expect(undone.executions[1].restoration).toBeUndefined()
+      expect(f.engine.undo).toHaveBeenCalledOnce()
+      expect(f.engine.undo.mock.calls[0][0].step.id).toBe('step')
+    } finally {f.cleanup()}
+  })
+  it('records a restoration that reports failure and retries that same step',async()=>{
+    const f=fixture(true,true,true,[step])
+    try {
+      await f.controller.investigate({symptom:'network fails'})
+      const run=await f.controller.apply('plan')
+      f.engine.undo
+        .mockResolvedValueOnce({passed:false,summary:'Original proxy state changed after undo started.',checks:[]})
+        .mockResolvedValueOnce({passed:true,summary:'Restored',checks:[]})
+      await expect(f.controller.undo(run.id)).rejects.toThrow('changed after undo started')
+      const afterFailure=(await f.controller.state()).history.find(item=>item.id===run.id)!
+      expect(afterFailure.status).toBe('partially-undone')
+      expect(afterFailure.executions[0].restoration).toMatchObject({status:'failed',summary:'Original proxy state changed after undo started.'})
+      expect(afterFailure.canUndo).toBe(true)
+      const retried=await f.controller.undo(run.id)
+      expect(retried.status).toBe('undone')
+      expect(retried.executions[0].restoration?.status).toBe('restored')
+      expect(f.engine.undo).toHaveBeenCalledTimes(2)
+    } finally {f.cleanup()}
+  })
+  it('persists a failed restoration and retries only steps that were not restored',async()=>{
+    const f=fixture(true,true,true,[step,secondStep,thirdStep])
+    try {
+      await f.controller.investigate({symptom:'network fails'})
+      const run=await f.controller.apply('plan')
+      expect(run.status).toBe('fixed')
+      let failedOnce=false
+      f.engine.undo.mockImplementation(async(executed:StepExecution)=>{
+        if(executed.step.id==='step-2' && !failedOnce) {
+          failedOnce=true
+          throw new Error('The setting file changed after this repair. Undo refused to preserve newer edits.')
+        }
+        return {passed:true,summary:'Restored '+executed.step.id,checks:[]}
+      })
+      await expect(f.controller.undo(run.id)).rejects.toThrow('newer edits')
+      const afterFailure=(await f.controller.state()).history.find(item=>item.id===run.id)!
+      expect(afterFailure.status).toBe('partially-undone')
+      expect(afterFailure.canUndo).toBe(true)
+      expect(afterFailure.executions.find(item=>item.step.id==='step-3')?.restoration?.status).toBe('restored')
+      expect(afterFailure.executions.find(item=>item.step.id==='step-2')?.restoration?.status).toBe('failed')
+      expect(afterFailure.executions.find(item=>item.step.id==='step')?.restoration).toBeUndefined()
+      expect(f.engine.undo.mock.calls.map((call:any[])=>call[0].step.id)).toEqual(['step-3','step-2'])
+      // A fresh controller reads the durable per-step outcomes from disk.
+      const reloaded=new Controller(f.dir,f.engine as any,f.model as any,f.settings,()=>{})
+      const retried=await reloaded.undo(run.id)
+      expect(retried.status).toBe('undone')
+      expect(retried.canUndo).toBe(false)
+      expect(retried.undoError).toBeUndefined()
+      expect(retried.executions.every(item=>item.restoration?.status==='restored')).toBe(true)
+      const calls=f.engine.undo.mock.calls.map((call:any[])=>call[0].step.id)
+      expect(calls).toEqual(['step-3','step-2','step-2','step'])
+      expect(calls.filter((id:string)=>id==='step-3')).toHaveLength(1)
+    } finally {f.cleanup()}
+  })
+  it('preserves original apply error when undo fails on an earlier step',async()=>{
+    const f=fixture(true,true,true,[step,secondStep])
+    try {
+      f.engine.execute.mockImplementation(async(s:RepairStep)=>execution(s,s.id!=='step-2'))
+      await f.controller.investigate({symptom:'network fails'})
+      const run=await f.controller.apply('plan')
+      expect(run.status).toBe('failed')
+      expect(run.error).toBe('step failed')
+      f.engine.undo.mockResolvedValueOnce({passed:false,summary:'Proxy changed by user.',checks:[]})
+      await expect(f.controller.undo(run.id)).rejects.toThrow('Proxy changed by user.')
+      const after=(await f.controller.state()).history.find(item=>item.id===run.id)!
+      expect(after.error).toBe('step failed')
+      expect(after.undoError).toBe('Proxy changed by user.')
+    } finally {f.cleanup()}
+  })
+})
+describe('concrete approval previews and saved research',()=>{
+  it('populates engine-derived previews during investigation and requires renewed review if a value changes before apply',async()=>{
+    const f=fixture(true)
+    try {
+      let currentBefore='Manual proxy: enabled (ProxyEnable=1; ProxyServer=127.0.0.1:8080)'
+      f.engine.previewStep=vi.fn(async()=>({resource:'Current user proxy',before:currentBefore,after:'Manual proxy: disabled (ProxyEnable=0; ProxyServer=(empty))'}))
+      const reviewed=await f.controller.investigate({symptom:'network fails'})
+      expect(reviewed.status).toBe('ready')
+      expect(reviewed.steps[0].preview).toEqual({
+        resource:'Current user proxy',
+        before:'Manual proxy: enabled (ProxyEnable=1; ProxyServer=127.0.0.1:8080)',
+        after:'Manual proxy: disabled (ProxyEnable=0; ProxyServer=(empty))',
+      })
+      currentBefore='Manual proxy: enabled (ProxyEnable=1; ProxyServer=10.0.0.1:9000)'
+      await expect(f.controller.apply(reviewed.id)).rejects.toThrow('A setting changed since review')
+      expect(f.engine.execute).not.toHaveBeenCalled()
+      const updated=(await f.controller.state()).plans.find(item=>item.id===reviewed.id)!
+      expect(updated.status).toBe('needs-validation')
+      expect(updated.review.approved).toBe(false)
+      expect(updated.steps[0].preview?.before).toBe(currentBefore)
+    } finally {f.cleanup()}
+  })
+  it('persists completed plans, evidence, and sources on investigation and requires fresh scan validation after restart',async()=>{
+    const f=fixture(true)
+    try {
+      f.engine.previewStep=vi.fn(async()=>({resource:'Current user proxy',before:'Manual proxy: enabled',after:'Manual proxy: disabled'}))
+      const richPlan:RepairPlan={
+        ...structuredClone(plan),
+        evidence:[{id:'ev-1',area:'windows',category:'network',title:'Manual proxy configured',severity:'info',observed:'127.0.0.1:8080',details:['Check proxy']}],
+        sources:[{url:'https://support.microsoft.com/en-us/windows/proxy',title:'Proxy settings',kind:'official',supports:'windows.clearUserProxy',applicable:true,concerns:[],corroboratedBy:[]}],
+      }
+      vi.mocked(investigate).mockResolvedValueOnce(richPlan)
+      const created=await f.controller.investigate({symptom:'network fails'})
+      expect(created.status).toBe('ready')
+      vi.mocked(investigate).mockClear()
+      // Restart 1: restored without calling investigate; requires scan before apply.
+      const reloaded1=new Controller(f.dir,f.engine as any,f.model as any,f.settings,()=>{})
+      const state1=await reloaded1.state()
+      expect(vi.mocked(investigate)).not.toHaveBeenCalled()
+      expect(state1.plans).toHaveLength(1)
+      expect(state1.plans[0].status).toBe('needs-validation')
+      expect(state1.plans[0].evidence).toEqual(richPlan.evidence)
+      expect(state1.plans[0].sources).toEqual(richPlan.sources)
+      await expect(reloaded1.apply(created.id)).rejects.toThrow('Ready')
+      // After a fresh scan confirms unchanged targets and previews, the plan is Ready again.
+      await reloaded1.scan()
+      const afterScan=(await reloaded1.state()).plans[0]
+      expect(afterScan.status).toBe('ready')
+      // If another restart sees a changed preview value during scan, it blocks the plan.
+      const reloaded2=new Controller(f.dir,f.engine as any,f.model as any,f.settings,()=>{})
+      f.engine.previewStep=vi.fn(async()=>({resource:'Current user proxy',before:'Manual proxy: disabled',after:'Manual proxy: disabled'}))
+      await reloaded2.scan()
+      const blocked=(await reloaded2.state()).plans[0]
+      expect(blocked.status).toBe('blocked')
+      expect(blocked.review.approved).toBe(false)
+    } finally {f.cleanup()}
   })
 })
 describe('structured local investigation',()=>{

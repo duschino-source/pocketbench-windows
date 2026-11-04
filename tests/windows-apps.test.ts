@@ -354,5 +354,25 @@ describe('param validation, retargeting, refusal paths', () => {
     const verify = await repairs.verify(step, exec)
     expect(verify.passed).toBe(true)
     expect(verify.summary).toMatch(/no host process/i)
+    seedObsidian(labRoot, '{"cssTheme":"Broken-Theme","theme":"dark"}')
+    const obsidian = appFor('obsidian')
+    const steam: AppTarget = { ...appFor('steam'), packageId: 'Valve.Steam' }
+    const allRepairs = repairsFor(lab, [app, obsidian, steam])
+    const snap = { scannedAt: 'now', platform: 'win32', machine: { name: 't', os: 'w', memoryTotal: 1, memoryFree: 1, uptime: 1, cpuCount: 1 }, metrics: { diskFree: 1, diskTotal: 1, cpuPercent: null }, diagnostics: [], apps: [app, obsidian, steam], startup: [], services: [], labMode: true }
+    expect(await allRepairs.previewStep(stepFor(app, 'app.patchConfig', { appId: app.id, setting: 'network.proxy.type', value: 0 }), snap)).toEqual({
+      resource: 'firefox lab: network.proxy.type',
+      before: '1 (manual proxy enabled)',
+      after: '0 (manual proxy disabled)',
+    })
+    expect(await allRepairs.previewStep(stepFor(obsidian, 'app.patchConfig', { appId: obsidian.id, setting: 'cssTheme', value: '' }), snap)).toEqual({
+      resource: 'obsidian lab: cssTheme',
+      before: 'Broken-Theme',
+      after: '(default / none)',
+    })
+    expect(await allRepairs.previewStep(stepFor(steam, 'app.updatePackage', { appId: steam.id, packageId: 'Valve.Steam' }), snap)).toEqual({
+      resource: 'steam lab: Valve.Steam',
+      before: 'Version 1.0',
+      after: 'Update to exact WinGet package; installed version verified afterward',
+    })
   })
 })

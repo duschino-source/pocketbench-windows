@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Badge, Button } from '@fluentui/react-components';
 import { ArrowUndoRegular } from '@fluentui/react-icons';
+import { isUndoEligible } from '../../shared/contracts';
 import { formatDateTime, planStatusLabel, runStatusLabel } from '../format';
 import { isBusy, type ViewProps } from '../types';
 import { VerificationChecks } from '../components/VerificationChecks';
@@ -32,6 +33,9 @@ export function ActivityView(props: ViewProps): React.ReactElement {
             {history.map((run) => {
               const undoing = busy.undoingRunId === run.id;
               const pendingReboot = run.verification.some((result) => result.pendingReboot);
+              const retryingUndo = run.executions.some((execution) => execution.restoration?.status === 'failed');
+              const restoredUndo = run.executions.some((execution) => execution.restoration?.status === 'restored');
+              const residualEffects = run.executions.some((execution) => execution.success && !isUndoEligible(execution));
               return (
                 <li key={run.id} className="pb-row">
                   <div className="pb-row-main">
@@ -42,12 +46,16 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                       {run.executions.length} step execution{run.executions.length === 1 ? '' : 's'}
                     </div>
                     {run.error && <div className="pb-row-sub">Error: {run.error}</div>}
+                    {run.undoError && run.undoError !== run.error && <div className="pb-row-sub">Undo error: {run.undoError}</div>}
                     <details className="pb-technical pb-operation-details">
                       <summary>Operation details ({run.executions.length} steps)</summary>
                       {run.executions.map((execution) => (
                         <div key={execution.step.id} className="pb-row-sub">
                           {execution.success ? 'Succeeded' : 'Failed'}: {execution.step.title}
                           {execution.backupId ? ` (backup ${execution.backupId})` : ''}
+                          {execution.restoration
+                            ? ` · Restore ${execution.restoration.status === 'restored' ? 'complete' : 'failed'}: ${execution.restoration.summary}`
+                            : ''}
                         </div>
                       ))}
                       {run.verification.map((result, index) => (
@@ -57,6 +65,14 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                         </div>
                       ))}
                     </details>
+                    {run.status === 'partially-undone' && (
+                      <div className="pb-pending-reboot" role="status">
+                        {!run.canUndo ? 'Reversible changes with backups were restored.' : restoredUndo ? 'Some reversible changes were restored, but restoration is incomplete.' : 'Restoration did not complete.'}
+                        {residualEffects || run.executions.some((execution) => !execution.success)
+                          ? ' Irreversible or failed steps may still remain in place.'
+                          : ' Some restoration work is still outstanding.'}
+                      </div>
+                    )}
                     {pendingReboot && (
                       <div className="pb-pending-reboot" role="status">
                         Pending reboot: verification remains incomplete until Windows restarts.
@@ -76,9 +92,9 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                         onClick={() => {
                           void props.onUndo(run.id);
                         }}
-                        title="Undo uses the stored backup for the last supported reversible operation"
+                        title="Undo restores each eligible backed-up reversible step in reverse order. Irreversible changes are never attempted and remain in place."
                       >
-                        {undoing ? 'Undoing…' : 'Undo'}
+                        {undoing ? 'Undoing…' : retryingUndo ? 'Retry undo' : restoredUndo ? 'Continue undo' : 'Undo'}
                       </Button>
                     ) : (
                       <Badge
@@ -86,7 +102,7 @@ export function ActivityView(props: ViewProps): React.ReactElement {
                         color="subtle"
                         title="Only supported reversible operations can be undone"
                       >
-                        Undo unavailable
+                        {run.status === 'partially-undone' ? 'Residual effects remain' : 'Undo unavailable'}
                       </Badge>
                     )}
                   </div>

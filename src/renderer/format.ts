@@ -100,5 +100,7 @@ export function runStatusLabel(status: RepairRun['status']): string {
       return 'Pending verification';
     case 'undone':
       return 'Undone';
+    case 'partially-undone':
+      return 'Partially undone';
   }
 }

@@ -619,6 +619,7 @@ code, .pb-mono { font-family: "Consolas", monospace; font-size: .875rem; overflo
 .pb-before-after { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin: 16px 0 0; }
 .pb-before-after dt { font-size: .875rem; color: var(--pb-text-secondary); margin-bottom: 4px; }
 .pb-before-after dd { margin: 0; color: var(--pb-text); overflow-wrap: anywhere; font-size: 1rem; }
+.pb-plan-preview { padding: 12px 16px; margin: 16px 0 0; background: var(--pb-subtle); border: 1px solid var(--pb-border); border-radius: 8px; }
 .pb-app :focus-visible, .pb-provider summary:focus-visible { outline: 2px solid var(--pb-accent-strong); outline-offset: 3px; }
 @media (min-width: 1100px) and (min-height: 760px) {
   .pb-apply-bar-sticky { position: sticky; bottom: 0; z-index: 2; box-shadow: 0 -1px 0 var(--pb-border); }
@@ -648,7 +649,7 @@ code, .pb-mono { font-family: "Consolas", monospace; font-size: .875rem; overflo
 .pb-app .fui-Badge { color: var(--pb-text-secondary); background: var(--pb-subtle); border-color: var(--pb-border-strong); }
 .pb-app .pb-status[data-status="fixed"] { color: var(--pb-success); border-color: currentColor; }
 .pb-app .pb-status[data-status="failed"], .pb-app .pb-status[data-status="blocked"] { color: var(--pb-danger); border-color: currentColor; }
-.pb-app .pb-status[data-status="pending-verification"], .pb-app .pb-status[data-status="needs-validation"] { color: var(--pb-warning); border-color: currentColor; }
+.pb-app .pb-status[data-status="pending-verification"], .pb-app .pb-status[data-status="needs-validation"], .pb-app .pb-status[data-status="partially-undone"] { color: var(--pb-warning); border-color: currentColor; }
 .pb-app .pb-status[data-status="ready"] { color: var(--pb-info); border-color: currentColor; }
 
 :root[data-theme="light"] .pb-brand-mark img,

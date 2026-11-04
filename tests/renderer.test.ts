@@ -42,6 +42,7 @@ describe('renderer formatting helpers', () => {
     expect(planStatusLabel('blocked')).toBe('Blocked');
     expect(runStatusLabel('pending-verification')).toBe('Pending verification');
     expect(runStatusLabel('undone')).toBe('Undone');
+    expect(runStatusLabel('partially-undone')).toBe('Partially undone');
   });
 
   it('finds plans and the latest run for a plan', () => {    const state = {

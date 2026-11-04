@@ -130,6 +130,12 @@ export function PlanDetail({
                       {step.title}
                     </div>
                     <p className="pb-row-sub">{step.impact}</p>
+                    {step.preview && (
+                      <dl className="pb-before-after pb-plan-preview">
+                        <div><dt>{step.preview.resource} · current</dt><dd>{step.preview.before}</dd></div>
+                        <div><dt>After this step</dt><dd>{step.preview.after}</dd></div>
+                      </dl>
+                    )}
                     <div className="pb-step-flags">
                       <Badge appearance="outline" color="subtle">
                         {step.reversible ? 'Backup & undo supported' : 'Cannot be undone'}
@@ -278,6 +284,26 @@ export function PlanDetail({
             </Badge>
           </div>
           {latestRun.error && <p className="pb-severity-critical">{latestRun.error}</p>}
+          {latestRun.undoError && latestRun.undoError !== latestRun.error && (
+            <p className="pb-severity-critical">{latestRun.undoError}</p>
+          )}
+          {latestRun.executions.some((execution) => execution.restoration) && (
+            <div>
+              <p className="pb-note">Undo result</p>
+              <ul className="pb-detail-list">
+                {latestRun.executions
+                  .filter((execution) => execution.restoration)
+                  .map((execution) => (
+                    <li key={`${latestRun.id}-undo-${execution.step.id}`}>
+                      <strong>
+                        {execution.restoration?.status === 'restored' ? 'Restored' : 'Restore failed'}:
+                      </strong>{' '}
+                      {execution.step.title}. {execution.restoration?.summary}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
           {latestRun.verification.map((verification, index) => (
             <div key={index}>
               <p className="pb-note">{verification.summary}</p>
