@@ -374,5 +374,14 @@ describe('param validation, retargeting, refusal paths', () => {
       before: 'Version 1.0',
       after: 'Update to exact WinGet package; installed version verified afterward',
     })
+    expect(allRepairs.diagnostics(obsidian)).toEqual([
+      expect.objectContaining({
+        id: `obsidian-theme-${obsidian.id}`,
+        appId: obsidian.id,
+        suggestedOperation: 'app.patchConfig',
+      }),
+    ])
+    seedObsidian(labRoot, '{"cssTheme":"","theme":"dark"}')
+    expect(allRepairs.diagnostics(obsidian)).toEqual([])
   })
 })

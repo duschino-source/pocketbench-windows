@@ -283,6 +283,13 @@ export interface ServiceCandidateOptions {
   nowMs?: number
 }
 
+function isFreshResult(result: DiagnosticResult, options: ServiceCandidateOptions = {}): boolean {
+  if (options.maxAgeMs === undefined) return true
+  const observedAt = Date.parse(result.timestamp)
+  const nowMs = options.nowMs ?? Date.now()
+  return Number.isFinite(observedAt) && Number.isFinite(nowMs) && nowMs - observedAt <= options.maxAgeMs && observedAt <= nowMs
+}
+
 function serviceCandidate(results: DiagnosticResult[], category: InvestigationCategory, options: ServiceCandidateOptions = {}): { serviceName: string; startMode: string } | null {
   const allowed = OFFLINE_SERVICE_CATEGORIES[category]
   if (!allowed) return null
@@ -290,11 +297,7 @@ function serviceCandidate(results: DiagnosticResult[], category: InvestigationCa
     if (!result || result.tool !== 'windows_service') continue
     // An unavailable, partial, stale or failed observation is not sufficient authority.
     if (result.status !== 'ok') continue
-    if (options.maxAgeMs !== undefined) {
-      const observedAt = Date.parse(result.timestamp)
-      const nowMs = options.nowMs ?? Date.now()
-      if (!Number.isFinite(observedAt) || !Number.isFinite(nowMs) || nowMs - observedAt > options.maxAgeMs || observedAt > nowMs) continue
-    }
+    if (!isFreshResult(result, options)) continue
     const data = result.data as Record<string, JsonValue> | undefined
     if (!data) continue
     const name = data.serviceName
@@ -336,21 +339,72 @@ export function buildOfflineRepairPlan(input: OfflinePlanInput): RepairPlan | nu
   const results = Array.isArray(input.results) ? input.results : []
   const now = input.now ?? (() => new Date().toISOString())
   const nowMs = Date.parse(now())
-  const candidate = serviceCandidate(results, input.category, { maxAgeMs: input.maxAgeMs, nowMs })
-  if (!candidate) return null
-  const meta = OPERATION_META['windows.startService']
-  const serviceName = candidate.serviceName
-  const step: RepairStep = {
-    id: stableId('offline-step-', ['windows.startService', serviceName]),
-    operation: 'windows.startService',
-    title: `${meta.description} ${serviceName}`,
-    targetId: serviceName,
-    params: { serviceName },
-    requiresAdmin: meta.requiresAdmin,
-    reversible: meta.reversible,
-    impact: meta.impact,
-    verification: meta.verification,
-  }
+  const service = serviceCandidate(results, input.category, { maxAgeMs: input.maxAgeMs, nowMs })
+  const safeAppId = typeof input.appId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(input.appId) ? input.appId : undefined
+  const proxy = !service && input.category === 'network' && results.some(r => r && r.tool === 'windows_network' && (r.status === 'ok' || r.status === 'partial') && isFreshResult(r, { maxAgeMs: input.maxAgeMs, nowMs }) && (r.data as Record<string, JsonValue> | undefined)?.proxyEnabled === true)
+  const appConfig = !service && !proxy && input.category === 'app' && safeAppId
+    ? (() => {
+        for (const r of results) {
+          if (!r || r.tool !== 'app_health' || r.status !== 'ok' || !isFreshResult(r, { maxAgeMs: input.maxAgeMs, nowMs })) continue
+          const data = r.data as Record<string, JsonValue> | undefined
+          if (!data || data.profileState !== 'single' || data.ambiguous === true || data.profileCount === 0) continue
+          if (data.app === 'firefox') return { app: 'firefox' as const, label: 'Firefox', setting: 'network.proxy.type', value: 0 as JsonValue }
+          if (data.app === 'obsidian') return { app: 'obsidian' as const, label: 'Obsidian', setting: 'cssTheme', value: '' as JsonValue }
+        }
+        return null
+      })()
+    : null
+  if (!service && !proxy && !appConfig) return null
+  const operation = service ? 'windows.startService' : proxy ? 'windows.clearUserProxy' : 'app.patchConfig'
+  const meta = OPERATION_META[operation]
+  const step: RepairStep = service
+    ? {
+        id: stableId('offline-step-', ['windows.startService', service.serviceName]),
+        operation: 'windows.startService',
+        title: `${meta.description} ${service.serviceName}`,
+        targetId: service.serviceName,
+        params: { serviceName: service.serviceName },
+        requiresAdmin: meta.requiresAdmin,
+        reversible: meta.reversible,
+        impact: meta.impact,
+        verification: meta.verification,
+      }
+    : proxy
+      ? {
+          id: stableId('offline-step-', ['windows.clearUserProxy', 'windows']),
+          operation: 'windows.clearUserProxy',
+          title: meta.description,
+          targetId: 'windows',
+          params: {},
+          requiresAdmin: meta.requiresAdmin,
+          reversible: meta.reversible,
+          impact: meta.impact,
+          verification: meta.verification,
+        }
+      : {
+          id: stableId('offline-step-', ['app.patchConfig', safeAppId!, appConfig!.setting]),
+          operation: 'app.patchConfig',
+          title: `${meta.description} ${appConfig!.label}`,
+          targetId: safeAppId!,
+          params: { appId: safeAppId!, setting: appConfig!.setting, value: appConfig!.value },
+          requiresAdmin: meta.requiresAdmin,
+          reversible: meta.reversible,
+          impact: meta.impact,
+          verification: meta.verification,
+        }
+  const planTitle = service
+    ? `Offline candidate: start ${service.serviceName}`
+    : proxy
+      ? 'Offline candidate: clear manual user proxy'
+      : `Offline candidate: reset ${appConfig!.label} ${appConfig!.setting}`
+  const planSummary = service
+    ? `A read-only probe observed ${service.serviceName} stopped with an automatic start mode. This is an unexecuted candidate plan, not proof of a root cause.`
+    : proxy
+      ? 'A read-only network probe observed an active manual user proxy. This is an unexecuted candidate plan, not proof of a root cause.'
+      : `A read-only application probe observed a single ${appConfig!.label} profile location eligible for a backed-up setting reset. This is an unexecuted candidate plan, not proof of a root cause.`
+  const planTarget: RepairPlan['target'] = appConfig && safeAppId
+    ? { kind: 'app', id: safeAppId, name: appConfig.label }
+    : { kind: 'windows', name: 'Windows' }
   const providedEvidence = Array.isArray(input.evidence)
     ? input.evidence.slice(0, 6).map(item => ({ ...item, details: item.details.slice(0, 6) }))
     : []
@@ -360,9 +414,9 @@ export function buildOfflineRepairPlan(input: OfflinePlanInput): RepairPlan | nu
   return {
     id: stableId('offline-plan-', [input.category, step.operation, canonicalJson(step.params)]),
     createdAt: now(),
-    title: `Offline candidate: start ${serviceName}`,
-    summary: `A read-only probe observed ${serviceName} stopped with an automatic start mode. This is an unexecuted candidate plan, not proof of a root cause.`,
-    target: { kind: 'windows', name: 'Windows' },
+    title: planTitle,
+    summary: planSummary,
+    target: planTarget,
     status: 'needs-validation',
     reason: 'Offline candidate only. A fresh scan and the normal controller validation are required before any repair; nothing was executed.',
     evidence,

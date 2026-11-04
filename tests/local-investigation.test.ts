@@ -237,6 +237,106 @@ describe('narrow offline repair candidate', () => {
     expect(buildOfflineRepairPlan({ category: 'network', results: [result({ data: { serviceName: 'Spooler', status: 'Stopped', startMode: 'Auto' } })] })).toBeNull()
     expect(buildOfflineRepairPlan({ category: 'bogus' as never, results: [stoppedDnscache] })).toBeNull()
   })
+
+  it('builds reversible clearUserProxy and app.patchConfig offline candidates from fresh unambiguous probes', () => {
+    const proxyProbe = result({
+      tool: 'windows_network',
+      scope: 'network:www.microsoft.com',
+      status: 'partial',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      data: { hostname: 'www.microsoft.com', proxyEnabled: true },
+    })
+    const proxyPlan = buildOfflineRepairPlan({
+      category: 'network',
+      results: [proxyProbe],
+      maxAgeMs: 120_000,
+      now: () => '2026-01-01T00:00:30.000Z',
+    })
+    expect(proxyPlan).not.toBeNull()
+    expect(proxyPlan!.status).toBe('needs-validation')
+    expect(proxyPlan!.review.approved).toBe(false)
+    expect(proxyPlan!.steps[0]).toMatchObject({
+      operation: 'windows.clearUserProxy',
+      targetId: 'windows',
+      params: {},
+      reversible: true,
+    })
+    // Stopped automatic service takes priority over proxy when both are observed.
+    const prioritized = buildOfflineRepairPlan({
+      category: 'network',
+      results: [proxyProbe, stoppedDnscache],
+    })
+    expect(prioritized!.steps[0].operation).toBe('windows.startService')
+    // Disabled or unavailable proxy probes produce no plan.
+    expect(buildOfflineRepairPlan({
+      category: 'network',
+      results: [result({ ...proxyProbe, data: { hostname: 'www.microsoft.com', proxyEnabled: false } })],
+    })).toBeNull()
+    expect(buildOfflineRepairPlan({
+      category: 'network',
+      results: [result({ ...proxyProbe, status: 'unavailable' })],
+    })).toBeNull()
+
+    const firefoxProbe = result({
+      tool: 'app_health',
+      scope: 'app:firefox',
+      status: 'ok',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      data: { app: 'firefox', profileState: 'single', profileCount: 1, running: false },
+    })
+    const firefoxPlan = buildOfflineRepairPlan({
+      category: 'app',
+      appId: 'app-firefox',
+      results: [firefoxProbe],
+      maxAgeMs: 120_000,
+      now: () => '2026-01-01T00:00:30.000Z',
+    })
+    expect(firefoxPlan).not.toBeNull()
+    expect(firefoxPlan!.target).toEqual({ kind: 'app', id: 'app-firefox', name: 'Firefox' })
+    expect(firefoxPlan!.steps[0]).toMatchObject({
+      operation: 'app.patchConfig',
+      targetId: 'app-firefox',
+      params: { appId: 'app-firefox', setting: 'network.proxy.type', value: 0 },
+      reversible: true,
+    })
+
+    const obsidianProbe = result({
+      tool: 'app_health',
+      scope: 'app:obsidian',
+      status: 'ok',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      data: { app: 'obsidian', profileState: 'single', profileCount: 1, running: false },
+    })
+    const obsidianPlan = buildOfflineRepairPlan({
+      category: 'app',
+      appId: 'app-obsidian',
+      results: [obsidianProbe],
+    })
+    expect(obsidianPlan).not.toBeNull()
+    expect(obsidianPlan!.steps[0]).toMatchObject({
+      operation: 'app.patchConfig',
+      targetId: 'app-obsidian',
+      params: { appId: 'app-obsidian', setting: 'cssTheme', value: '' },
+    })
+
+    // Ambiguous profiles, missing appId, zero profiles, or Steam produce no app.patchConfig candidate.
+    expect(buildOfflineRepairPlan({ category: 'app', results: [firefoxProbe] })).toBeNull()
+    expect(buildOfflineRepairPlan({
+      category: 'app',
+      appId: 'app-firefox',
+      results: [result({ ...firefoxProbe, data: { app: 'firefox', profileState: 'multiple', profileCount: 2 } })],
+    })).toBeNull()
+    expect(buildOfflineRepairPlan({
+      category: 'app',
+      appId: 'app-firefox',
+      results: [result({ ...firefoxProbe, data: { app: 'firefox', profileState: 'single', profileCount: 0 } })],
+    })).toBeNull()
+    expect(buildOfflineRepairPlan({
+      category: 'app',
+      appId: 'app-steam',
+      results: [result({ ...firefoxProbe, data: { app: 'steam', profileState: 'single', profileCount: 1 } })],
+    })).toBeNull()
+  })
 })
 
 describe('local investigation tool scope', () => {

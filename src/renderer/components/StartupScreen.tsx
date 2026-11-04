@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Button } from '@fluentui/react-components';
+import { Button, ProgressBar, Spinner } from '@fluentui/react-components';
 import { ArrowClockwiseRegular, ErrorCircleRegular } from '@fluentui/react-icons';
 
 const brandMark = new URL('../../../resources/brand/mark.svg', import.meta.url).href;
@@ -42,8 +42,12 @@ export function StartupScreen({ error, onRetry }: StartupScreenProps): React.Rea
           </div>
         ) : (
           <div className="pb-boot-loading" role="status" aria-live="polite">
+            <Spinner className="pb-boot-spinner" size="medium" />
             <h1>Starting PocketBench</h1>
-            <p className="pb-note">Reading local application state. This usually takes a moment.</p>
+            <p className="pb-note">Reading local application state and preparing workspace…</p>
+            <div className="pb-boot-progress" aria-hidden="true">
+              <ProgressBar />
+            </div>
           </div>
         )}
       </div>

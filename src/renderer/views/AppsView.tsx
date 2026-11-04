@@ -82,7 +82,7 @@ export function AppsView(props: ViewProps): React.ReactElement {
           <div className="pb-apps-toolbar">
             <SearchBox
               placeholder="Search applications…"
-              aria-label="Search installed applications"
+              aria-label="Search installed applications" dismiss={query ? undefined : null}
               value={query}
               onChange={(_, data) => setQuery(data.value ?? '')}
               onKeyDown={(event) => {

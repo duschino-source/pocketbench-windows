@@ -124,7 +124,7 @@ export function WindowsView(props: ViewProps): React.ReactElement {
             <div className="pb-findings-search">
               <SearchBox
                 placeholder="Search findings…"
-                aria-label="Search diagnostic findings"
+                aria-label="Search diagnostic findings" dismiss={query ? undefined : null}
                 value={query}
                 onChange={(_, data) => setQuery(data.value ?? '')}
               />

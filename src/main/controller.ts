@@ -112,12 +112,16 @@ export class Controller {
         }
         localPlan=local.plan
         if(localPlan) {
-          const fresh=await this.engine.scan();snapshot={...fresh,diagnostics:snapshot.diagnostics};this.snapshot=snapshot
+          const fresh=await this.engine.scan();snapshot={...fresh,diagnostics:[...local.evidence,...fresh.diagnostics.filter(item=>item.context?.source!=='local-read-only-tool')]};this.snapshot=snapshot
           const step=localPlan.steps[0]
           const service=fresh.services.find(service=>service.name===step.targetId)
-          if(service?.status.toLowerCase()==='stopped' && /^(auto|automatic)$/i.test(service.startType) && service.triggerStart!==true) {
+          const app=fresh.apps.find(item=>item.id===step.targetId)
+          const validService=step.operation==='windows.startService' && service?.status.toLowerCase()==='stopped' && /^(auto|automatic)$/i.test(service.startType) && service.triggerStart!==true
+          const validProxy=step.operation==='windows.clearUserProxy' && fresh.diagnostics.some(d=>d.id==='windows-proxy') && this.engine.capabilities(fresh).some(c=>c.operation==='windows.clearUserProxy')
+          const validAppConfig=step.operation==='app.patchConfig' && Boolean(app && app.capabilities.includes('app.patchConfig') && fresh.diagnostics.some(d=>d.id==='firefox-proxy-'+app.id || d.id==='obsidian-theme-'+app.id))
+          if(validService || validProxy || validAppConfig) {
             localPlan.steps=[this.engine.validateStep(step,fresh)]
-            localPlan.status='ready';localPlan.reason='A tested local rule matched a stopped automatic service. Apply fix starts only this service.'
+            localPlan.status='ready';localPlan.reason=validService?'A tested local rule matched a stopped automatic service. Apply fix starts only this service.':validProxy?'A tested local rule matched an active manual user proxy. Apply fix clears the proxy with a restorable backup.':'A tested local rule matched a supported application configuration issue. Apply fix backs up and resets only this setting.'
             localPlan.review={approved:true,rationale:'Local catalog rule and fresh native preconditions validated; independent verification remains required.',concerns:[]}
           } else localPlan=null
         }

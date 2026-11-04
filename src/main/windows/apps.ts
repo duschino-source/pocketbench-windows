@@ -104,6 +104,11 @@ export class AppRepairs {
         const pref=this.prefFile(roots.profile)
         if(this.readPref(pref,'network.proxy.type')===1)evidence.push({id:'firefox-proxy-'+app.id,area:'app',category:'network',title:'Firefox has a manual proxy',severity:'info',observed:'The default Firefox profile uses a manual proxy.',details:['This may be intentional. Investigate connection failures before resetting it.'],appId:app.id,suggestedOperation:'app.patchConfig'})
       }
+      if(roots.vault) {
+        const file=safeFile(join(roots.vault,'.obsidian','appearance.json'),roots.vault,this.lab)
+        const theme=JSON.parse(readFileSync(file,'utf8'))?.cssTheme
+        if(typeof theme==='string' && theme.trim().length>0)evidence.push({id:'obsidian-theme-'+app.id,area:'app',category:'app',title:'Obsidian uses a custom CSS theme',severity:'info',observed:`The active Obsidian vault uses custom theme "${theme.trim().slice(0,64)}".`,details:['A broken custom theme can prevent normal rendering. Resetting it preserves notes and vault data.'],appId:app.id,suggestedOperation:'app.patchConfig'})
+      }
       return evidence
     }catch{return []}
   }

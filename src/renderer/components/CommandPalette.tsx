@@ -85,7 +85,7 @@ export function CommandPalette({ open, items, onClose, onAction }: CommandPalett
         <SearchBox
           autoFocus
           placeholder="Search apps, findings, plans…"
-          aria-label="Search apps, findings, and plans"
+          aria-label="Search apps, findings, and plans" dismiss={query ? undefined : null}
           value={query}
           onChange={(_, data) => setQuery(data.value ?? '')}
         />

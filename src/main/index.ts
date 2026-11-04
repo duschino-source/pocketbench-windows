@@ -81,7 +81,7 @@ app.whenReady().then(async()=>{
   session.defaultSession.setPermissionCheckHandler(()=>false)
   const devUrl=process.env.ELECTRON_RENDERER_URL
   const startUrl=devUrl || new URL('../renderer/index.html',import.meta.url).href
-  window=new BrowserWindow({width:1340,height:880,minWidth:980,minHeight:680,title:'PocketBench',icon:join(process.env.POCKETBENCH_RESOURCES,'icon.ico'),backgroundColor:'#000000',show:true,autoHideMenuBar:true,webPreferences:{preload:join(here,'../preload/index.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,spellcheck:false}})
+  window=new BrowserWindow({width:1340,height:880,minWidth:980,minHeight:680,title:'PocketBench',icon:join(process.env.POCKETBENCH_RESOURCES,'icon.ico'),backgroundColor:'#171c24',show:true,autoHideMenuBar:true,webPreferences:{preload:join(here,'../preload/index.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,spellcheck:false}})
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}))
   window.webContents.on('will-navigate',(event,url)=>{if(url!==startUrl)event.preventDefault()})
   window.webContents.on('will-attach-webview',event=>event.preventDefault())

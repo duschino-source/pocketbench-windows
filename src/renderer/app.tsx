@@ -97,7 +97,7 @@ export default function App(): React.ReactElement {
     const requestId = ++loadId.current;
     setLoadError(null);
     try {
-      const next = await getApi().getState();
+      const [next] = await Promise.all([getApi().getState(), requestId === 1 ? new Promise((resolve) => setTimeout(resolve, 650)) : Promise.resolve()]);
       if (requestId === loadId.current) setState(next);
     } catch (error: unknown) {
       if (requestId === loadId.current) setLoadError(toMessage(error));
@@ -543,7 +543,7 @@ export default function App(): React.ReactElement {
                 Lab mode
               </Badge>
             )}
-            <Button appearance="subtle" size="small" icon={<SearchRegular />} aria-label="Search (Ctrl+K)" onClick={() => setPaletteOpen(true)}>Search</Button>
+            <Button className="pb-header-search" appearance="subtle" size="small" icon={<SearchRegular />} aria-label="Search (Ctrl+K)" onClick={() => setPaletteOpen(true)}>Search <span className="pb-header-kbd" aria-hidden="true">Ctrl+K</span></Button>
             <Button className="pb-connection" appearance="subtle" size="small" onClick={() => navigate('settings')}><span className={'pb-status-dot' + (state.settings.hasApiKey ? '' : ' pb-status-dot-off')} />{state.settings.hasApiKey ? 'Meta connected' : 'Meta not connected'}</Button>
             {active && (
               <span className="pb-working" aria-live="polite">

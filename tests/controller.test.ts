@@ -400,6 +400,49 @@ describe('offline deterministic category local checks (no API key)',()=>{
       expect(f.engine.execute).not.toHaveBeenCalled()
     } finally {f.cleanup()}
   })
+  it('promotes offline manual user proxy and app.patchConfig candidates only when fresh scan confirms active issue',async()=>{
+    const f=fixture(true,false,false)
+    try {
+      vi.mocked(investigate).mockClear()
+      const ts=networkEvidenceTs()
+      vi.mocked(createDiagnosticTools).mockReturnValue({invoke:vi.fn(async(name:string)=>{
+        if(name==='windows_network')return {tool:name,timestamp:ts,scope:'network:www.microsoft.com',status:'partial',observations:['Current-user proxy is enabled.'],data:{hostname:'www.microsoft.com',proxyEnabled:true}} as any
+        if(name==='windows_service')return {tool:name,timestamp:ts,scope:'service:Dnscache',status:'ok',observations:['Running.'],data:{serviceName:'Dnscache',status:'Running',startMode:'Auto'}} as any
+        if(name==='app_health')return {tool:name,timestamp:ts,scope:'app:obsidian',status:'ok',observations:['One profile.'],data:{app:'obsidian',profileState:'single',profileCount:1,running:false}} as any
+        return {tool:name,timestamp:ts,scope:name,status:'unavailable',observations:[],data:{}} as any
+      })} as any)
+      f.engine.capabilities.mockReturnValue([{operation:'windows.clearUserProxy',targetId:'windows',description:'Clear proxy',constraints:'{}'}])
+      f.engine.scan.mockResolvedValue({
+        ...snapshot,
+        labMode:false,
+        diagnostics:[{id:'windows-proxy',area:'windows',category:'network',title:'A manual proxy is configured',severity:'info',observed:'127.0.0.1:8080',details:[],suggestedOperation:'windows.clearUserProxy'}],
+      })
+      const proxyPlan=await f.controller.investigate({symptom:'Proxy blocks internet',category:'connectivity'})
+      expect(proxyPlan.status).toBe('ready')
+      expect(proxyPlan.review.approved).toBe(true)
+      expect(proxyPlan.steps[0].operation).toBe('windows.clearUserProxy')
+      expect(vi.mocked(investigate)).not.toHaveBeenCalled()
+
+      // App candidate promoted when fresh scan reports obsidian-theme-<id> diagnostic and capability
+      const obsidianApp={id:'app-obsidian',name:'Obsidian',version:'1.0',publisher:'Obsidian',family:'obsidian' as const,capabilities:['app.patchConfig' as const]}
+      f.engine.scan.mockResolvedValue({
+        ...snapshot,
+        labMode:false,
+        apps:[obsidianApp],
+        diagnostics:[{id:'obsidian-theme-app-obsidian',area:'app',category:'app',title:'Obsidian uses a custom CSS theme',severity:'info',observed:'Broken',details:[],appId:'app-obsidian',suggestedOperation:'app.patchConfig'}],
+      })
+      const appPlan=await (async()=>{await f.controller.scan();return f.controller.investigate({symptom:'Obsidian theme broken',category:'app',appId:'app-obsidian'})})()
+      expect(appPlan.status).toBe('ready')
+      expect(appPlan.review.approved).toBe(true)
+      expect(appPlan.steps[0]).toMatchObject({operation:'app.patchConfig',targetId:'app-obsidian',params:{appId:'app-obsidian',setting:'cssTheme',value:''}})
+
+      // Discarded when fresh scan shows no active custom theme diagnostic
+      f.engine.scan.mockResolvedValue({...snapshot,labMode:false,apps:[obsidianApp],diagnostics:[]})
+      const cleanAppPlan=await f.controller.investigate({symptom:'Obsidian theme broken',category:'app',appId:'app-obsidian'})
+      expect(cleanAppPlan.status).toBe('needs-validation')
+      expect(cleanAppPlan.steps).toHaveLength(0)
+    } finally {f.cleanup()}
+  })
 })
 describe('model call budgets',()=>{
   it('legacy uncategorized with key: 1 local + 1 diagnostic agent + 1 research model',async()=>{
